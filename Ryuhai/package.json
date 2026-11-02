@@ -1,8 +1,0 @@
-{
-  "name": "ryuhai",
-  "version": "1.0.0",
-  "description": "Two-player hidden-pick guessing game",
-  "main": "server/server.js",
-  "scripts": { "start": "node server/server.js", "test": "node shared/engine.test.js && node server/server.test.js" },
-  "dependencies": { "ws": "^8.18.0" }
-}
