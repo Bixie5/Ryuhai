@@ -1,0 +1,28 @@
+plugins { id 'com.android.application' }
+
+android {
+    namespace 'com.hiddencourt.game'
+    compileSdk 34
+    defaultConfig {
+        applicationId 'com.hiddencourt.game'
+        minSdk 24
+        targetSdk 34
+        versionCode 1
+        versionName '1.0'
+    }
+    buildTypes {
+        release { minifyEnabled false }
+    }
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
+    }
+}
+
+// Bundle the web client and the shared rules engine into the app so Bot and Pass & play work offline.
+tasks.register('syncWeb', Sync) {
+    from("$rootDir/../web")
+    from("$rootDir/../shared") { into 'shared'; exclude '*.test.js' }
+    into "$projectDir/src/main/assets/www"
+}
+preBuild.dependsOn 'syncWeb'
