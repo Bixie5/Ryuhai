@@ -90,6 +90,28 @@ t('win by monarch capture', () => {
   assert.ok(w.over && w.winner === 0 && w.end.code === 'monarch' && w.end.loser === 1);
 });
 
+t('losing one of two Monarchs does not end the game; losing the last one does', () => {
+  let s = E.play(
+    state(['empress', 'fool'], ['monarch', 'monarch', 'wizard']),
+    id(0, 'empress'), id(1, 'monarch', 0)
+  );
+  assert.ok(!s.over, 'one Monarch remains, so the game continues');
+  assert.strictEqual(count(s, 1, 'monarch'), 1);
+
+  s = E.play(s, id(0, 'empress'), id(1, 'monarch', 1));
+  assert.ok(s.over && s.winner === 0 && s.end.code === 'monarch');
+});
+
+t('simultaneously losing one of two Monarchs each is not a Monarch draw', () => {
+  const s = E.play(
+    state(['monarch', 'monarch', 'fool'], ['monarch', 'monarch', 'wizard']),
+    id(0, 'monarch', 0), id(1, 'monarch', 0)
+  );
+  assert.ok(!s.over, 'both players still have one Monarch');
+  assert.strictEqual(count(s, 0, 'monarch'), 1);
+  assert.strictEqual(count(s, 1, 'monarch'), 1);
+});
+
 t('win by opponent running out of pieces', () => {
   const s = E.play(state(['knight', 'knight2'].map((x) => x === 'knight2' ? 'dragon' : x), ['fool']), id(0, 'knight'), id(1, 'fool'));
   assert.ok(s.over && s.winner === 0 && s.end.code === 'no_pieces');

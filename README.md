@@ -43,7 +43,7 @@ Install the debug APK by sending it to the phone and allowing "install unknown a
 | Piece | Beats | Uses |
 |---|---|---|
 | Dragon | everything | spent after winning; 1 per game |
-| Monarch | Knight, Wizard, Knave, Fool | reusable; losing it loses the game |
+| Monarch | Knight, Wizard, Knave, Fool | reusable; losing your last Monarch loses the game |
 | Knight | Wizard, Knave, Fool, Empress | reusable |
 | Wizard | Knave, Fool, Empress | reusable; you hold two |
 | Knave | Fool, Empress | reusable; you hold two |
@@ -56,7 +56,8 @@ Win by: opponent has no pieces, opponent has no piece that can beat any of yours
 
 ### Rulings I had to choose
 - A winning piece returns to hand and can be used again; the loser is destroyed. Only the Dragon is spent after winning. Equal pieces destroy each other (except Jokers).
-- If a Monarch is captured, that decides the game even if the capturer would also be out of power.
+- A player loses only when their last true Monarch is captured. Losing one of multiple Monarchs does not end the game. If both players lose their last Monarch in the same round, the game is a draw.
+- Capturing a player's last Monarch takes precedence over the other loss conditions, unless both players lose their last Monarch in the same round.
 - If both sides meet a loss condition at once, it is a draw.
 
 ## Layout

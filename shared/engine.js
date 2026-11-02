@@ -9,7 +9,7 @@
   // singleUse  = the piece is spent after winning a round (only the Dragon)
   const PIECES = {
     dragon:  { name: 'Dragon',  icon: '\u{1F409}', count: 1, singleUse: true,  blurb: 'Beats every piece. One use per game.' },
-    monarch: { name: 'Monarch', icon: '\u{1F451}', count: 1, singleUse: false, blurb: 'Beats Knight, Wizard, Knave, Fool. If it falls, you lose.' },
+    monarch: { name: 'Monarch', icon: '\u{1F451}', count: 1, singleUse: false, blurb: 'Beats Knight, Wizard, Knave, Fool. You lose only when your last Monarch falls.' },
     knight:  { name: 'Knight',  icon: '\u{1F6E1}\uFE0F', count: 1, singleUse: false, blurb: 'Beats Wizard, Knave, Fool, Empress.' },
     wizard:  { name: 'Wizard',  icon: '\u{1F9D9}', count: 2, singleUse: false,  blurb: 'Beats Knave, Fool, Empress. You hold two.' },
     knave:   { name: 'Knave',   icon: '\u{1F5E1}\uFE0F', count: 2, singleUse: false,  blurb: 'Beats Fool, Empress. You hold two.' },
@@ -60,7 +60,8 @@
   function lossReason(s, seat, royalLost) {
     const mine = s.hands[seat];
     const theirs = s.hands[1 - seat];
-    if (royalLost[seat]) return 'monarch';
+    // Losing one Monarch is not fatal if another true Monarch remains in hand.
+    if (royalLost[seat] && !mine.some((p) => p.royal)) return 'monarch';
     if (!mine.length) return 'no_pieces';
     if (theirs.length && !canWinAny(mine, theirs)) return 'no_power';
     return null;
@@ -113,11 +114,15 @@
     s.idle = progress ? 0 : s.idle + 1;
     s.history.push(log);
 
-    // Taking the Monarch is decisive: it beats the other loss conditions unless both fell together.
+    // Losing the final true Monarch is decisive, unless both players lose their final
+    // Monarch in the same round. Losing one of multiple Monarchs is not game-ending.
+    const finalRoyalLost = [0, 1].map((seat) =>
+      royalLost[seat] && !s.hands[seat].some((p) => p.royal)
+    );
     let l0, l1;
-    if (royalLost[0] !== royalLost[1]) {
-      l0 = royalLost[0] ? 'monarch' : null;
-      l1 = royalLost[1] ? 'monarch' : null;
+    if (finalRoyalLost[0] !== finalRoyalLost[1]) {
+      l0 = finalRoyalLost[0] ? 'monarch' : null;
+      l1 = finalRoyalLost[1] ? 'monarch' : null;
     } else {
       l0 = lossReason(s, 0, royalLost);
       l1 = lossReason(s, 1, royalLost);
