@@ -14,7 +14,8 @@ function client(port) {
 }
 
 (async () => {
-  const { server } = createServer();
+  const tmpShop = require('fs').mkdtempSync(require('path').join(require('os').tmpdir(), 'hc-shop-'));
+  const { server } = createServer({ shopDir: tmpShop });
   await new Promise((r) => server.listen(0, '127.0.0.1', r));
   const port = server.address().port;
   const a = await client(port), b = await client(port);
@@ -33,7 +34,8 @@ function client(port) {
   const sa = await a.next((m) => m.type === 'state' && m.started);
   const sb = await b.next((m) => m.type === 'state' && m.started);
   assert.deepStrictEqual(sa.names, ['Ann', 'Bob']);
-  assert.ok(!('opp' in sb.view) && sb.view.oppCount === 11, 'opp hand not sent'); assert.ok(!JSON.stringify(sb).includes(sa.view.you[0].id), 'opponent piece ids never sent');
+  assert.ok(!('opp' in sb.view) && !('oppCount' in sb.view), 'opp hand not sent'); assert.ok(!JSON.stringify(sb).includes(sa.view.you[0].id), 'opponent piece ids never sent');
+  assert.strictEqual(sa.gid, 1); assert.strictEqual(sb.gid, 1);
   console.log('ok - join starts game, opponent hand hidden');
 
   const full = await client(port); full.send({ type: 'join', code: ja.code, name: 'X' });

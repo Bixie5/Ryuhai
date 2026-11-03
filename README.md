@@ -1,7 +1,7 @@
 # Ryuhai
 
 Two-player secret-pick game. Both players lock in one piece per turn, then both are revealed.
-Your opponent's hand and pick are both hidden; only the piece count and the pieces that have fallen are public.
+Your opponent's hand and pick are both hidden. The game never shows what they hold or have lost, only what each round reveals.
 
 ## Play on the web (same Wi-Fi / LAN, or over the internet)
 
@@ -19,6 +19,10 @@ To play over the internet, host the folder on any Node host (Render, Fly, a VPS)
 `PORT` is read from the environment.
 
 Each round ends on its result. Online, both players press **Next turn** on their own device before the next round starts. In Pass & play, either player presses Next turn, then Player 1 confirms "I am Player 1" before picking (and Player 2 does the same after Player 1 locks in).
+
+**PvP points:** a separate score shown top-left on the home screen with a W/L/D record. Only online games against another person count (not the Bot, not Pass & play): win +10, draw +5, loss -10. A win where your Empress made the final capture (took the Monarch) is worth +20. Points and the record are saved on the device.
+
+**Bananas:** every finished game pays out bananas, shown in the top-right corner: win +100, draw +50, loss -50. The balance is saved on the device (browser or Android app), starts at 0 and can go below zero. Games against the Bot and online games pay out; Pass & play does not.
 
 Also on the menu: **Play vs Bot** and **Pass & play** (one device, works offline).
 
@@ -52,13 +56,11 @@ Install the debug APK by sending it to the phone and allowing "install unknown a
 | Joker | becomes the piece it meets; both return to hand | reusable, cannot be destroyed before transforming |
 
 Equal pieces destroy each other (two Monarchs = both lose = draw). Joker vs Joker: both return to hand.
-Win by: opponent has no pieces, opponent has no piece that can beat any of yours, or opponent's Monarch is taken.
+The game ends only when a Monarch is eliminated: capture the opponent's last Monarch and you win; if both players lose their last Monarch in the same round it is a draw. Having no piece that can beat the opponent's is not a loss, play just continues.
 
 ### Rulings I had to choose
 - A winning piece returns to hand and can be used again; the loser is destroyed. Only the Dragon is spent after winning. Equal pieces destroy each other (except Jokers).
 - A player loses only when their last true Monarch is captured. Losing one of multiple Monarchs does not end the game. If both players lose their last Monarch in the same round, the game is a draw.
-- Capturing a player's last Monarch takes precedence over the other loss conditions, unless both players lose their last Monarch in the same round.
-- If both sides meet a loss condition at once, it is a draw.
 
 ## Layout
 - `shared/engine.js` rules engine (used by server, browser and app), `shared/engine.test.js`
@@ -67,3 +69,22 @@ Win by: opponent has no pieces, opponent has no piece that can beat any of yours
 - `android/` Gradle project
 
 `npm test` runs the engine and server tests.
+
+## Shop and skins
+The **Shop** button on the home screen sells alternate artwork ("skins") for each piece, paid for with bananas. Skins are cosmetic only. Ownership and the equipped skin are saved on the device. In online games your opponent sees the skins you have equipped; Pass & play uses each device's equipped skins for both seats; the Bot always uses the classic art.
+
+The shop ships **empty**. To add skins later:
+1. Start the server (`npm start`). It prints an admin link like `http://localhost:3000/admin?key=...` (set `ADMIN_KEY=yourkey` to keep the key the same between runs).
+2. Open the link, pick the piece, upload the image, type a name, set the price in bananas, click the face. Prices can be edited or skins deleted on the same page.
+3. Players see new skins when they next open the Shop.
+
+You can also edit `web/shop/catalog.json` by hand, see `web/shop/README.md`. For the Android app, rebuild the APK after adding skins so the images and `catalog.js` are bundled (or, if the app is pointed at your server, it loads the catalog and images from there).
+
+## Online save (accounts)
+Players can make a free account (**Sign in** button next to Shop) so bananas, PvP points, the W/L/D record, bought skins and equipped skins are saved on the server and can be loaded on any device. No outside service is needed, it uses the game server itself.
+
+- **How it works:** the server keeps accounts in `data/accounts.json` (change the location with `ACCOUNTS_FILE`). Passwords are stored only as salted scrypt hashes, login tokens only as hashes. Back this file up, it is the players' saves.
+- **Automatic:** once signed in, every change uploads in the background. Opening the app on another device pulls the latest. If two devices changed things while apart, they are merged (bananas and points add up, skins are combined).
+- **First sign-in on a device that already has progress:** the player chooses to use the account's progress, keep the device's, or combine both.
+- **Limits:** there is no password reset (a forgotten password means a new account), and a save is only as trustworthy as the device that sends it, so this is not anti-cheat. If the server is reachable over the internet, put it behind HTTPS so passwords are not sent in clear text.
+- **Google sign-in / Google Play Games:** not included. Both need a Google Cloud / Play Console project and keys that only you can create. The account system above is built so a Google sign-in can be added later as another way to get the same account.

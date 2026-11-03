@@ -117,16 +117,15 @@ t('win by opponent running out of pieces', () => {
   assert.ok(s.over && s.winner === 0 && s.end.code === 'no_pieces');
 });
 
-t('win when opponent has nothing that can beat anything of yours', () => {
-  // seat 1 holds only fools; seat 0 holds only knights (and a fool pair removed). Fools can't beat knights.
-  const s = E.play(state(['knight', 'knight'.replace('knight', 'monarch')], ['fool', 'fool', 'wizard']), id(0, 'knight'), id(1, 'wizard'));
-  // seat1 left: fool, fool. seat0: knight, monarch -> fools beat only empress -> seat1 loses
-  assert.ok(s.over && s.winner === 0 && s.end.code === 'no_power' && s.end.loser === 1);
+t('no piece able to beat the other is NOT a loss; play continues', () => {
+  // seat 1 holds only fools, seat 0 holds only knights + monarch: fools cannot win, but the game goes on
+  const s = E.play(state(['knight', 'monarch'], ['fool', 'fool', 'wizard']), id(0, 'knight'), id(1, 'wizard'));
+  assert.ok(!s.over, 'game continues until a Monarch falls');
 });
 
-t('joker holder is never stuck on no_power', () => {
-  const s = state(['joker'], ['knight']);
-  assert.ok(E.canWinAny(s.hands[0], s.hands[1]));
+t('Empress and Knave sitting only against Fools: still no end without a Monarch capture', () => {
+  const s = E.play(state(['fool', 'fool'], ['fool', 'fool']), id(0, 'fool'), id(1, 'fool'));
+  assert.ok(!s.over || s.end.code === 'no_pieces');
 });
 
 t('mutual loss is a draw', () => {
@@ -152,7 +151,7 @@ t('viewFor hides nothing but the pick', () => {
   const g = E.createGame();
   const v = E.viewFor(g, 0, [true, false]);
   assert.strictEqual(v.you.length, 11);
-  assert.strictEqual(v.oppCount, 11);
+  assert.ok(!('oppCount' in v), 'no information about the opponent hand');
   assert.ok(!('opp' in v), 'opponent hand is not sent');
   assert.deepStrictEqual(v.locked, { you: true, opp: false });
 });

@@ -6,6 +6,8 @@ const os = require('os');
 const crypto = require('crypto');
 const { WebSocketServer } = require('ws');
 const E = require('../shared/engine');
+const { createAccounts } = require('./accounts');
+const { createShop } = require('./shop');
 
 const ROOT = path.join(__dirname, '..');
 const MIME = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8',
@@ -16,10 +18,71 @@ function createServer(opts) {
   const rooms = new Map(); // code -> room
   const ROOM_TTL = 1000 * 60 * 60 * 3;
 
+  const shop = createShop(opts.shopDir || path.join(ROOT, 'web', 'shop'));
+  // Key for the admin page. Set ADMIN_KEY in the environment to keep it the same between runs.
+  const adminKey = opts.adminKey || process.env.ADMIN_KEY || crypto.randomBytes(8).toString('hex');
+  const keyOk = (k) => { const a = Buffer.from(String(k || '')), b = Buffer.from(adminKey); return a.length === b.length && crypto.timingSafeEqual(a, b); };
+  const json = (res, status, obj) => { res.writeHead(status, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' }); res.end(JSON.stringify(obj)); };
+
+  function adminApi(req, res, url) {
+    if (!keyOk(req.headers['x-admin-key'])) return json(res, 401, { error: 'Wrong or missing admin key.' });
+    const m = url.match(/^\/api\/admin\/(items|check)(?:\/([a-z0-9-]+))?$/);
+    if (!m) return json(res, 404, { error: 'Not found' });
+    if (m[1] === 'check') return json(res, 200, { ok: true });
+    const id = m[2];
+    if (req.method === 'GET' && !id) return json(res, 200, { items: shop.list(), pieces: shop.PIECES });
+    if (req.method === 'DELETE' && id) { try { shop.deleteItem(id); return json(res, 200, { ok: true }); } catch (e) { return json(res, e.status || 500, { error: e.message }); } }
+    if ((req.method === 'POST' && !id) || (req.method === 'PUT' && id)) {
+      let size = 0; const chunks = [];
+      req.on('data', (c) => { size += c.length; if (size > 8 * 1024 * 1024) { json(res, 413, { error: 'Upload too large.' }); req.destroy(); } else chunks.push(c); });
+      req.on('end', () => {
+        let body; try { body = JSON.parse(Buffer.concat(chunks).toString('utf8')); } catch (e) { return json(res, 400, { error: 'Bad request.' }); }
+        try { const item = id ? shop.updateItem(id, body) : shop.addItem(body); return json(res, 200, { item: item }); }
+        catch (e) { return json(res, e.status || 500, { error: e.status ? e.message : 'Could not save.' }); }
+      });
+      return;
+    }
+    return json(res, 405, { error: 'Method not allowed' });
+  }
+
+  // ---------- player accounts (cloud save) ----------
+  const accounts = createAccounts(opts.accountsFile || process.env.ACCOUNTS_FILE || path.join(ROOT, 'data', 'accounts.json'));
+  const CORS = { 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Headers': 'Content-Type, Authorization', 'Access-Control-Allow-Methods': 'GET, POST, PUT, DELETE, OPTIONS', 'Access-Control-Max-Age': '600' };
+  const cjson = (res, status, obj) => { res.writeHead(status, Object.assign({ 'Content-Type': 'application/json', 'Cache-Control': 'no-store' }, CORS)); res.end(JSON.stringify(obj)); };
+  function accountApi(req, res, url) {
+    if (req.method === 'OPTIONS') { res.writeHead(204, CORS); return res.end(); }
+    const route = url.slice('/api/account/'.length);
+    const ip = req.socket.remoteAddress || '?';
+    const bearer = String(req.headers.authorization || '').replace(/^Bearer\s+/i, '');
+    const fail = (e) => cjson(res, e.status || 500, Object.assign({ error: e.status ? e.message : 'Something went wrong.' }, e.extra || {}));
+    const run = (fn) => { Promise.resolve().then(fn).then((r) => cjson(res, 200, r || { ok: true }), fail); };
+    if (route === 'ping' && req.method === 'GET') return cjson(res, 200, { ok: true });
+    if (route === 'data' && req.method === 'GET') return run(() => accounts.getData(bearer));
+    if (route === 'logout' && req.method === 'POST') return run(() => { accounts.logout(bearer); });
+    if (req.method !== 'POST' && req.method !== 'PUT') return cjson(res, 405, { error: 'Method not allowed' });
+    const chunks = []; let size = 0, dead = false;
+    req.on('data', (c) => { size += c.length; if (size > 64 * 1024) { dead = true; cjson(res, 413, { error: 'Too much data.' }); req.destroy(); } else chunks.push(c); });
+    req.on('end', () => {
+      if (dead) return;
+      let b; try { b = JSON.parse(Buffer.concat(chunks).toString('utf8') || '{}'); } catch (e) { return cjson(res, 400, { error: 'Bad request.' }); }
+      if (!b || typeof b !== 'object') b = {};
+      if (route === 'register' && req.method === 'POST') return run(() => accounts.register(b.username, b.password, b.data, ip));
+      if (route === 'login' && req.method === 'POST') return run(() => accounts.login(b.username, b.password, ip));
+      if (route === 'data' && req.method === 'PUT') return run(() => accounts.putData(bearer, b.data, b.rev));
+      if (route === 'delete' && req.method === 'POST') return run(() => accounts.remove(bearer, b.password));
+      cjson(res, 404, { error: 'Not found' });
+    });
+  }
+
   const server = http.createServer((req, res) => {
-    let url = decodeURIComponent((req.url || '/').split('?')[0]);
+    let url;
+    try { url = decodeURIComponent((req.url || '/').split('?')[0]); } catch (e) { res.writeHead(400); return res.end(); }
     if (url === '/healthz') { res.writeHead(200); return res.end('ok'); }
+    if (url.startsWith('/api/admin/')) return adminApi(req, res, url);
+    if (url.startsWith('/api/account/')) return accountApi(req, res, url);
+    if (req.method !== 'GET' && req.method !== 'HEAD') { res.writeHead(405); return res.end(); }
     if (url === '/') url = '/web/index.html';
+    if (url === '/admin') url = '/web/admin.html';
     let file;
     if (url.startsWith('/shared/')) file = path.join(ROOT, url);
     else if (url.startsWith('/web/')) file = path.join(ROOT, url);
@@ -27,7 +90,8 @@ function createServer(opts) {
     if (!path.resolve(file).startsWith(ROOT) || file.includes('..')) { res.writeHead(403); return res.end(); }
     fs.readFile(file, (err, data) => {
       if (err) { res.writeHead(404); return res.end('Not found'); }
-      res.writeHead(200, { 'Content-Type': MIME[path.extname(file)] || 'application/octet-stream', 'Cache-Control': 'no-cache' });
+      // CORS: the Android app loads pages from file:// and reads the shop catalog and images from this server.
+      res.writeHead(200, { 'Content-Type': MIME[path.extname(file)] || 'application/octet-stream', 'Cache-Control': 'no-cache', 'Access-Control-Allow-Origin': '*' });
       res.end(data);
     });
   });
@@ -42,6 +106,12 @@ function createServer(opts) {
       for (let i = 0; i < 4; i++) c += letters[crypto.randomInt(letters.length)];
       if (!rooms.has(c)) return c;
     }
+  };
+  // Equipped skins are cosmetic: { piece: skinId }. Only well-formed ids for known pieces are relayed.
+  const cleanSkins = (o) => {
+    const out = {};
+    if (o && typeof o === 'object') shop.PIECES.forEach((p) => { const v = o[p]; if (typeof v === 'string' && /^[a-z0-9-]{1,48}$/.test(v)) out[p] = v; });
+    return out;
   };
   const cleanName = (n, fallback) => String(n || '').replace(/[^\w \-.']/g, '').trim().slice(0, 16) || fallback;
 
@@ -58,6 +128,8 @@ function createServer(opts) {
         started: !!room.game,
         rematch: room.rematch,
         phase: room.phase,
+        gid: room.gid,
+        oppSkins: (room.players[1 - seat] && room.players[1 - seat].skins) || {},
         next: { you: !!room.nextReady[seat], opp: !!room.nextReady[1 - seat] },
         view: room.game ? E.viewFor(room.game, seat, locked) : null
       });
@@ -76,6 +148,7 @@ function createServer(opts) {
     room.rematch = [false, false];
     room.phase = 'pick';
     room.nextReady = [false, false];
+    room.gid = (room.gid || 0) + 1; // lets clients pay out bananas exactly once per game
     pushState(room);
   }
 
@@ -87,7 +160,7 @@ function createServer(opts) {
       case 'create': {
         const code = newCode();
         const token = crypto.randomBytes(12).toString('hex');
-        const room = { code, players: [{ ws, name: cleanName(msg.name, 'Player 1'), token }, null], picks: [null, null], game: null, rematch: [false, false], phase: 'pick', nextReady: [false, false], isPublic: msg.isPublic !== false, touched: Date.now() };
+        const room = { code, players: [{ ws, name: cleanName(msg.name, 'Player 1'), token, skins: cleanSkins(msg.skins) }, null], picks: [null, null], game: null, rematch: [false, false], phase: 'pick', nextReady: [false, false], isPublic: msg.isPublic !== false, touched: Date.now() };
         rooms.set(code, room);
         ws.room = room;
         send(ws, { type: 'joined', code, seat: 0, token });
@@ -98,7 +171,7 @@ function createServer(opts) {
         if (!room) return send(ws, { type: 'error', message: 'No room with that code.' });
         if (room.players[1]) return send(ws, { type: 'error', message: 'That room is already full.' });
         const token = crypto.randomBytes(12).toString('hex');
-        room.players[1] = { ws, name: cleanName(msg.name, 'Player 2'), token };
+        room.players[1] = { ws, name: cleanName(msg.name, 'Player 2'), token, skins: cleanSkins(msg.skins) };
         ws.room = room;
         room.touched = Date.now();
         send(ws, { type: 'joined', code: room.code, seat: 1, token });
@@ -194,7 +267,7 @@ function createServer(opts) {
     });
   }, 15000);
   server.on('close', () => clearInterval(timer));
-  return { server, wss, rooms };
+  return { server, wss, rooms, shop, adminKey };
 }
 
 function lanAddresses() {
@@ -206,12 +279,14 @@ function lanAddresses() {
 
 if (require.main === module) {
   const port = Number(process.env.PORT) || 3000;
-  const { server } = createServer();
+  const { server, adminKey } = createServer();
   server.listen(port, '0.0.0.0', () => {
     console.log('\nRyuhai is running.\n');
     console.log('  This computer:   http://localhost:' + port);
     lanAddresses().forEach((ip) => console.log('  Same Wi-Fi/LAN:  http://' + ip + ':' + port));
-    console.log('\nShare the LAN address with the other player, then create or join a room.\n');
+    console.log('\nShare the LAN address with the other player, then create or join a room.');
+    console.log('\nShop admin (add skins, set prices):  http://localhost:' + port + '/admin?key=' + adminKey);
+    console.log('Keep that link private. Set ADMIN_KEY in the environment to choose your own key.\n');
   });
 }
 

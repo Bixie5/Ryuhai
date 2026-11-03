@@ -11,8 +11,14 @@
 <body>
 <main id="app">
 
+  <!-- banana balance, top-right corner on every screen -->
+  <div id="bananaBar" class="bananas" role="status" aria-live="polite" title="Your bananas">
+    <span id="bananaIcon" class="banana-icon"></span><b id="bananaCount">0</b>
+  </div>
+
   <!-- HOME -->
   <section id="home" class="screen">
+    <div id="pointsBar" class="points" role="status" title="PvP points"><span class="pl">PTS</span><b id="pointsCount">0</b><i id="pointsRec">0W 0L 0D</i></div>
     <header class="brand">
       <div id="heroArt" class="hero-art" aria-hidden="true"></div>
       <h1>Ryuhai</h1>
@@ -32,6 +38,10 @@
         <button id="btnBot" class="btn ghost">Play vs Bot</button>
         <button id="btnHotseat" class="btn ghost">Pass &amp; play</button>
       </div>
+      <div class="row split">
+        <button id="btnShop" class="btn shop-btn"><span class="bi" id="shopBtnIcon"></span>Shop</button>
+        <button id="btnAccount" class="btn ghost acct-btn"><span id="acctDot" class="acct-dot"></span><span id="acctLabel">Sign in</span></button>
+      </div>
     </div>
 
     <p id="homeMsg" class="msg" role="status"></p>
@@ -40,6 +50,19 @@
       <button id="btnRules" class="link">How to play</button>
       <button id="btnServer" class="link">Server</button>
     </footer>
+  </section>
+
+  <!-- SHOP -->
+  <section id="shop" class="screen" hidden>
+    <div class="topbar">
+      <button id="btnShopBack" class="link" aria-label="Back to menu">&larr; Back</button>
+      <div class="roomtag"><b>Shop</b></div>
+      <span></span>
+    </div>
+    <p class="shop-intro">Spend your bananas on new looks for your pieces. Equipped skins show on your cards and your opponent sees them in online games.</p>
+    <div id="shopFilters" class="shop-filters" role="tablist" aria-label="Filter by piece"></div>
+    <p id="shopEmpty" class="shop-empty" hidden>No skins in the shop yet. New arrivals will show up here.</p>
+    <div id="shopGrid" class="shop-grid"></div>
   </section>
 
   <!-- GAME -->
@@ -55,7 +78,6 @@
       <div class="who" id="oppWho"><span class="dot"></span><b id="oppName">Opponent</b><small id="oppStatus"></small></div>
       <div class="round">Round <b id="roundNo">1</b></div>
     </div>
-    <div id="oppHand" class="minihand" aria-label="Opponent pieces (hidden)"></div>
 
     <div id="arena" class="arena" aria-live="polite">
       <div id="arenaIdle" class="arena-idle"></div>
@@ -98,11 +120,22 @@
     <div class="sheet center">
       <h2 id="endTitle"></h2>
       <p id="endText"></p>
+      <p id="bananaGain" class="banana-gain" hidden></p>
+      <p id="pointsGain" class="points-gain" hidden></p>
       <div class="stack">
         <button id="btnRematch" class="btn primary">Play again</button>
         <button id="btnEndLeave" class="btn ghost">Back to menu</button>
       </div>
       <p id="rematchNote" class="msg"></p>
+    </div>
+  </div>
+
+  <div id="previewOverlay" class="overlay" hidden>
+    <div class="sheet center preview-sheet">
+      <div id="previewImg" class="preview-img"></div>
+      <h2 id="previewName"></h2>
+      <p id="previewDesc" class="small"></p>
+      <button id="btnClosePreview" class="btn">Close</button>
     </div>
   </div>
 
@@ -117,16 +150,61 @@
   <div id="rulesOverlay" class="overlay" hidden>
     <div class="sheet">
       <h2>How to play</h2>
-      <p>Each turn both players secretly lock in one piece, then both are revealed. Your opponent's pieces stay hidden. You only see how many they hold and which have fallen, so the game is about memory, odds and reading your opponent.</p>
+      <p>Each turn both players secretly lock in one piece, then both are revealed. Your opponent's pieces stay hidden. You are never told what they hold or have lost, so the game is about memory, odds and reading your opponent.</p>
       <div id="rulesTable" class="rules-table"></div>
       <h3>You win when</h3>
       <ul>
-        <li>The opponent has no pieces left.</li>
-        <li>The opponent has no piece that can beat any of yours.</li>
-        <li>The opponent's Monarch is taken.</li>
+        <li>Your opponent's last Monarch is taken.</li>
       </ul>
+      <p class="small">If both Monarchs fall in the same round it is a draw. Having no piece that can beat the opponent's does not end the game.</p>
       <p class="small">Equal pieces destroy each other. The winning piece returns to hand and can be used again; only the Dragon is spent. A Joker becomes the piece it meets; both then return to hand. The Joker can never be destroyed before it transforms.</p>
       <button id="btnCloseRules" class="btn">Close</button>
+    </div>
+  </div>
+
+  <div id="accountOverlay" class="overlay" hidden>
+    <div class="sheet">
+      <h2>Online save</h2>
+
+      <form id="acctOut" autocomplete="on" novalidate>
+        <p class="small">Make an account to keep your bananas, points and skins safe online and load them on any device. It uses your game server, no other service needed.</p>
+        <div class="seg" role="tablist">
+          <button type="button" id="acctTabIn" class="on" role="tab">Sign in</button>
+          <button type="button" id="acctTabNew" role="tab">Create account</button>
+        </div>
+        <label class="field"><span>Username</span><input id="acctUser" maxlength="20" autocapitalize="off" autocomplete="username" spellcheck="false"></label>
+        <label class="field"><span>Password</span><input id="acctPass" type="password" maxlength="100" autocomplete="current-password"></label>
+        <p id="acctHint" class="small" hidden>3 to 20 letters, numbers or underscores. Password at least 6 characters. There is no password reset, so keep it safe.</p>
+        <button id="acctGo" type="submit" class="btn primary">Sign in</button>
+      </form>
+
+      <div id="acctChoice" hidden>
+        <p>This device and your account both have progress. What should happen?</p>
+        <div class="acct-cmp">
+          <div><b>This device</b><span id="cmpLocal"></span></div>
+          <div><b>Your account</b><span id="cmpCloud"></span></div>
+        </div>
+        <div class="stack">
+          <button id="chCloud" class="btn primary">Use my account's progress</button>
+          <button id="chBoth" class="btn">Combine both</button>
+          <button id="chDevice" class="btn ghost">Keep this device's progress</button>
+        </div>
+        <p class="small">Combine adds the bananas and points together and merges the skins. The other two replace one side with the other.</p>
+      </div>
+
+      <div id="acctIn" hidden>
+        <p>Signed in as <b id="acctName"></b></p>
+        <p id="acctStatus" class="small"></p>
+        <div class="acct-cmp"><div><b>Saved online</b><span id="acctSummary"></span></div></div>
+        <div class="stack">
+          <button id="acctSync" class="btn">Sync now</button>
+          <button id="acctOutBtn" class="btn ghost">Sign out</button>
+          <button id="acctDel" class="link danger">Delete account</button>
+        </div>
+      </div>
+
+      <p id="acctMsg" class="msg" role="status"></p>
+      <button id="btnAcctClose" class="btn ghost">Close</button>
     </div>
   </div>
 
@@ -147,6 +225,8 @@
 
 <script src="shared/engine.js"></script>
 <script src="pieces.js"></script>
+<script src="shop/catalog.js"></script>
+<script src="sync.js"></script>
 <script src="app.js"></script>
 </body>
 </html>

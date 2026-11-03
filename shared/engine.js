@@ -47,23 +47,11 @@
     return { hands: [newHand(0), newHand(1)], round: 0, idle: 0, over: false, winner: null, end: null, history: [] };
   }
 
-  // A side can still win if it holds a Joker (it becomes whatever it meets), or if any of its
-  // pieces beats any non-Joker piece the opponent holds. An opponent holding only Jokers
-  // cannot be beaten, but cannot be lost to either, so play continues (idle limit applies).
-  function canWinAny(mine, theirs) {
-    if (mine.some((a) => a.type === 'joker')) return true;
-    const targets = theirs.filter((b) => b.type !== 'joker');
-    if (!targets.length && theirs.length) return true;
-    return mine.some((a) => targets.some((b) => beats(a.type, b.type)));
-  }
-
   function lossReason(s, seat, royalLost) {
     const mine = s.hands[seat];
-    const theirs = s.hands[1 - seat];
     // Losing one Monarch is not fatal if another true Monarch remains in hand.
     if (royalLost[seat] && !mine.some((p) => p.royal)) return 'monarch';
     if (!mine.length) return 'no_pieces';
-    if (theirs.length && !canWinAny(mine, theirs)) return 'no_power';
     return null;
   }
 
@@ -158,7 +146,6 @@
     switch (end.code) {
       case 'monarch': return names[end.loser] + "'s Monarch has been taken.";
       case 'no_pieces': return names[end.loser] + ' has no pieces left.';
-      case 'no_power': return names[end.loser] + ' has no piece able to beat any of the opponent\'s.';
       default: return 'Both sides fell at the same moment.';
     }
   }
@@ -173,7 +160,6 @@
       winner: state.winner,
       end: state.end,
       you: state.hands[seat],
-      oppCount: state.hands[1 - seat].length,
       locked: { you: !!locked[seat], opp: !!locked[1 - seat] },
       last: state.history.length ? state.history[state.history.length - 1] : null,
       history: state.history
@@ -221,5 +207,5 @@
     return mine[mine.length - 1].id;
   }
 
-  return { PIECES, ORDER, BEATS, beats, canWinAny, createGame, play, describeRound, endText, viewFor, botPick, estimateOpponent };
+  return { PIECES, ORDER, BEATS, beats, createGame, play, describeRound, endText, viewFor, botPick, estimateOpponent };
 });

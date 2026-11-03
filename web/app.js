@@ -3,12 +3,98 @@
   'use strict';
   var E = window.HC, ART = window.HCArt;
   var $ = function (id) { return document.getElementById(id); };
+  // Saved values that follow the player's account when they are signed in.
+  var SYNC_KEYS = { hc_bananas: 1, hc_points: 1, hc_record: 1, hc_owned: 1, hc_equipped: 1, hc_banana_last: 1, hc_points_last: 1 };
   var store = {
     get: function (k) { try { return localStorage.getItem(k) || ''; } catch (e) { return ''; } },
-    set: function (k, v) { try { localStorage.setItem(k, v); } catch (e) {} },
+    set: function (k, v) { try { localStorage.setItem(k, v); } catch (e) {} if (SYNC_KEYS[k] && window.HCSync) window.HCSync.dirty(); },
+    remove: function (k) { try { localStorage.removeItem(k); } catch (e) {} },
     sget: function (k) { try { return sessionStorage.getItem(k) || ''; } catch (e) { return ''; } },
     sset: function (k, v) { try { if (v) sessionStorage.setItem(k, v); else sessionStorage.removeItem(k); } catch (e) {} }
   };
+
+
+  // ---------- Bananas (per-device currency) ----------
+  // win +100, draw +50, loss -50. Paid once per finished game (online and vs Bot; not Pass & play).
+  var BANANA_SVG = '<svg viewBox="0 0 32 32" aria-hidden="true"><path d="M7 5.5C5.4 6.6 5.8 8.6 6.3 10.8 8 20.5 15 28 26 27.2c1.7-.2 2.4-1.8 1-2.7C19 23.4 13.8 18 12.4 10 12 7.4 9.3 3.9 7 5.5z" fill="#ffd93b" stroke="#5e3f00" stroke-width="1.6" stroke-linejoin="round"/><path d="M6.6 5.6 5.2 3.4" stroke="#5e3f00" stroke-width="2.6" stroke-linecap="round"/><path d="M9.2 9.5c1.6 7.8 6 13.2 13.3 15.6" fill="none" stroke="#fff7b0" stroke-width="1.5" stroke-linecap="round" opacity=".85"/><path d="M25.4 27.1l2.3-.4" stroke="#5e3f00" stroke-width="2.4" stroke-linecap="round"/></svg>';
+  var BANANA_VALUE = { win: 100, draw: 50, loss: -50 };
+  var bananaShown = 0;
+  function bananaBalance() { var n = parseInt(store.get('hc_bananas'), 10); return isNaN(n) ? 0 : n; }
+  function fmtBananas(n) { return (n < 0 ? '-' : '') + Math.abs(n).toLocaleString('en-US'); }
+  function paintBananas(n) { bananaShown = n; $('bananaCount').textContent = fmtBananas(n); $('bananaBar').title = fmtBananas(n) + (Math.abs(n) === 1 ? ' banana' : ' bananas'); }
+  function tweenBananas(from, to) {
+    var bar = $('bananaBar'), t0 = Date.now(), dur = 700;
+    bar.classList.remove('pop'); void bar.offsetWidth; bar.classList.add('pop');
+    (function step() {
+      var k = Math.min(1, (Date.now() - t0) / dur);
+      paintBananas(Math.round(from + (to - from) * (1 - Math.pow(1 - k, 3))));
+      if (k < 1) setTimeout(step, 30);
+    })();
+  }
+  // ---------- Points (per-device PvP score) ----------
+  // Online PvP only: win +10, loss -10, draw +5. A win where the winning piece was the Empress is worth +20.
+  var POINT_VALUE = { win: 10, empressWin: 20, draw: 5, loss: -10 };
+  function pointsTotal() { var n = parseInt(store.get('hc_points'), 10); return isNaN(n) ? 0 : n; }
+  function pointsRecord() { try { var r = JSON.parse(store.get('hc_record') || '{}'); return { w: +r.w || 0, l: +r.l || 0, d: +r.d || 0 }; } catch (e) { return { w: 0, l: 0, d: 0 }; } }
+  function fmtPts(n) { return (n < 0 ? '-' : '') + Math.abs(n).toLocaleString('en-US'); }
+  function paintPoints() {
+    var r = pointsRecord(), t = pointsTotal();
+    $('pointsCount').textContent = fmtPts(t);
+    $('pointsRec').textContent = r.w + 'W ' + r.l + 'L ' + r.d + 'D';
+    $('pointsBar').title = 'PvP points: ' + fmtPts(t) + ' (' + r.w + ' wins, ' + r.l + ' losses, ' + r.d + ' draws)';
+  }
+  // Returns {delta, empress} or null when this game was already scored.
+  function awardPoints(gameKey, kind, empress) {
+    if (!gameKey || store.get('hc_points_last') === gameKey) return null;
+    store.set('hc_points_last', gameKey);
+    var delta = kind === 'win' ? (empress ? POINT_VALUE.empressWin : POINT_VALUE.win) : POINT_VALUE[kind];
+    store.set('hc_points', String(pointsTotal() + delta));
+    var r = pointsRecord(); if (kind === 'win') r.w++; else if (kind === 'loss') r.l++; else r.d++;
+    store.set('hc_record', JSON.stringify(r));
+    paintPoints();
+    return { delta: delta, empress: !!(kind === 'win' && empress) };
+  }
+
+  // Returns the amount paid, or null if this game was already paid out.
+  function awardBananas(gameKey, kind) {
+    if (!gameKey || store.get('hc_banana_last') === gameKey) return null;
+    store.set('hc_banana_last', gameKey);
+    var delta = BANANA_VALUE[kind], from = bananaBalance(), to = from + delta;
+    store.set('hc_bananas', String(to));
+    tweenBananas(from, to);
+    return delta;
+  }
+
+
+  // ---------- Skins: ownership, equipping, catalog ----------
+  function loadJson(key, fallback) { try { var v = JSON.parse(store.get(key)); return v && typeof v === typeof fallback ? v : fallback; } catch (e) { return fallback; } }
+  function ownedList() { var l = loadJson('hc_owned', []); return Array.isArray(l) ? l : []; }
+  function isOwned(id) { return ownedList().indexOf(id) !== -1; }
+  function equippedRaw() { var m = loadJson('hc_equipped', {}); return (m && !Array.isArray(m)) ? m : {}; }
+  // Only skins that are owned and still in the shop count; everything else falls back to the classic art.
+  function equippedMap() {
+    var raw = equippedRaw(), out = {};
+    E.ORDER.forEach(function (t) { var id = raw[t]; if (id && isOwned(id) && ART.item(id) && ART.item(id).piece === t) out[t] = id; });
+    return out;
+  }
+  function setEquipped(piece, id) { var m = equippedRaw(); if (id) m[piece] = id; else delete m[piece]; store.set('hc_equipped', JSON.stringify(m)); }
+  var skinCtx = { you: {}, opp: {} };
+
+  // Where the shop catalog and its images come from: the game server (when known) or the bundled copy.
+  function httpBase() {
+    var hosted = /^https?:$/.test(location.protocol) && location.host && location.hostname !== 'appassets.androidplatform.net';
+    if (hosted) return '';
+    var u = wsUrl();
+    return u ? u.replace(/^ws/, 'http').replace(/\/ws$/, '/') : null;
+  }
+  function refreshCatalog(done) {
+    var base = httpBase();
+    if (base === null || typeof fetch !== 'function') { if (done) done(); return; }
+    fetch(base + 'shop/catalog.json?t=' + Date.now(), { cache: 'no-store' })
+      .then(function (r) { if (!r.ok) throw new Error('bad'); return r.json(); })
+      .then(function (j) { ART.setCatalog(j, base + 'shop/'); if (done) done(); })
+      .catch(function () { if (done) done(); });
+  }
 
   // ---------- UI state ----------
   var session = null;      // current game session (online / bot / hotseat)
@@ -114,24 +200,26 @@
 
   // ---------- Local sessions (bot / pass & play) ----------
   function localSession(kind) {
-    var s = { kind: kind, game: null, picks: [null, null], viewSeat: 0, cover: null, phase: 'pick' };
+    var s = { kind: kind, gid: null, game: null, picks: [null, null], viewSeat: 0, cover: null, phase: 'pick' };
     var names = kind === 'bot' ? [playerName() || 'Player', 'The Bot'] : ['Player 1', 'Player 2'];
     function emit() {
       if (session !== s) return;
       var locked = [s.picks[0] != null, s.picks[1] != null];
       render({
         code: kind === 'bot' ? 'BOT' : 'LOCAL', names: names, connected: [true, true], started: true, rematch: [false, false],
-        view: E.viewFor(s.game, s.viewSeat, locked), cover: s.cover, phase: s.phase, next: null
+        view: E.viewFor(s.game, s.viewSeat, locked), cover: s.cover, phase: s.phase, next: null, gid: kind === 'bot' ? s.gid : null
       });
     }
     function resolve() {
       s.game = E.play(s.game, s.picks[0], s.picks[1]);
-      s.picks = [null, null]; s.viewSeat = 0; s.cover = null;
+      s.picks = [null, null]; s.cover = null;
+      // Bot games are always seen from seat 0. In Pass & play the result stays on the player who just picked (Player 2).
+      if (kind !== 'hotseat') s.viewSeat = 0;
       // Pass & play: stop on the result until someone presses Next turn.
       s.phase = (kind === 'hotseat' && !s.game.over) ? 'result' : 'pick';
     }
     function idOfType(seat, type) { var p = s.game.hands[seat].filter(function (x) { return x.type === type; })[0]; return p && p.id; }
-    s.start = function () { s.game = E.createGame(); s.picks = [null, null]; s.viewSeat = 0; s.cover = null; s.phase = 'pick'; emit(); };
+    s.start = function () { s.gid = kind + ':' + Date.now() + ':' + Math.random().toString(36).slice(2, 7); s.game = E.createGame(); s.picks = [null, null]; s.viewSeat = 0; s.cover = null; s.phase = 'pick'; emit(); };
     s.pick = function (type) {
       if (s.game.over) return;
       var seat = s.viewSeat;
@@ -201,7 +289,7 @@
 
     if (!v) {
       $('roundNo').textContent = '-';
-      $('oppHand').innerHTML = ''; $('hand').innerHTML = '';
+      $('hand').innerHTML = '';
       arenaSig = ''; setIdle('Waiting...', 'Share room code ' + msg.code + ' with your opponent.');
       show('arenaIdle', true); show('arenaReveal', false);
       $('btnLock').disabled = true; $('pickInfo').textContent = '';
@@ -210,6 +298,8 @@
     }
 
     if (myPick && (myPick.round !== v.round || myPick.seat !== seat)) myPick = null;
+    var kindNow = session && session.kind;
+    skinCtx = kindNow === 'online' ? { you: equippedMap(), opp: msg.oppSkins || {} } : kindNow === 'hotseat' ? { you: equippedMap(), opp: equippedMap() } : { you: equippedMap(), opp: {} };
     curPhase = msg.phase || 'pick';
     var key = v.round + ':' + seat + ':' + curPhase;
     if (key !== lastKey) { selType = null; lastKey = key; }
@@ -221,7 +311,6 @@
     $('oppWho').querySelector('.dot').style.opacity = oppOnline ? 1 : .3;
     $('youStatus').textContent = v.locked.you ? 'locked in' : '';
 
-    renderMini(v, 1 - seat);
     renderHand(v);
     renderArena(msg, v, seat);
 
@@ -248,23 +337,7 @@
     } else { clearTimeout(endTimer); show('endOverlay', false); }
   }
 
-  function avatar(type) { var d = el('span', 'av'); d.innerHTML = ART.face(type); return d; }
-
-  // The opponent's hand is hidden. Show only what is public: how many pieces they hold,
-  // and which of their pieces have been destroyed or spent so far.
-  function renderMini(v, oppSeat) {
-    var box = $('oppHand'); box.innerHTML = '';
-    box.appendChild(el('span', 'chip hidden-count', '\u{1F0A0} ' + v.oppCount + (v.oppCount === 1 ? ' piece hidden' : ' pieces hidden')));
-    var fallen = {}, spent = {};
-    (v.history || []).forEach(function (l) {
-      l.destroyed.forEach(function (d) { if (d.seat === oppSeat) { var t = d.wasJoker ? 'joker' : d.type; fallen[t] = (fallen[t] || 0) + 1; } });
-      l.spent.forEach(function (s) { if (s.seat === oppSeat) spent[s.type] = (spent[s.type] || 0) + 1; });
-    });
-    E.ORDER.forEach(function (t) {
-      if (fallen[t]) { var f = el('span', 'chip fallen'); f.appendChild(avatar(t)); f.appendChild(el('i', '', E.PIECES[t].name + (fallen[t] > 1 ? ' ×' + fallen[t] : '') + ' lost')); box.appendChild(f); }
-      if (spent[t]) { var s = el('span', 'chip fallen'); s.appendChild(avatar(t)); s.appendChild(el('i', '', E.PIECES[t].name + ' used')); box.appendChild(s); }
-    });
-  }
+  function avatar(type, skinId) { var d = el('span', 'av'); d.innerHTML = ART.face(type, skinId); return d; }
 
   function renderHand(v) {
     var box = $('hand'); box.innerHTML = '';
@@ -275,7 +348,7 @@
       var b = el('button', 'card' + (n ? '' : ' gone') + (disabled && n ? ' locked' : '') + (selType === t && n ? ' sel' : ''));
       b.type = 'button'; b.setAttribute('role', 'option'); b.dataset.t = t; b.style.setProperty('--c', ART.color(t));
       b.setAttribute('aria-label', E.PIECES[t].name + (n ? ' x' + n : ' (used)'));
-      var pic = el('div', 'pic'); pic.innerHTML = ART.portrait(t); b.appendChild(pic);
+      var pic = el('div', 'pic'); pic.innerHTML = ART.portrait(t, skinCtx.you[t]); b.appendChild(pic);
       if (n > 1) b.appendChild(el('span', 'n', '×' + n));
       b.appendChild(el('span', 'nm', E.PIECES[t].name));
       if (n && !disabled) b.addEventListener('click', function () { selType = t; render(lastMsg); });
@@ -288,7 +361,7 @@
     var d = el('div', 'fighter ' + side + ' ' + (cls || ''));
     d.style.setProperty('--c', type ? ART.color(type) : '#7a63ff');
     var frame = el('div', 'frame'), pic = el('div', 'pic');
-    if (type) { pic.innerHTML = ART.portrait(type); frame.appendChild(pic); }
+    if (type) { pic.innerHTML = ART.portrait(type, (skinCtx[side === 'opp' ? 'opp' : 'you'] || {})[type]); frame.appendChild(pic); }
     else { pic.appendChild(el('div', 'sigil', '♛')); frame.appendChild(pic); }
     var plate = el('div', 'plate');
     plate.appendChild(el('b', '', type ? E.PIECES[type].name : '???'));
@@ -364,6 +437,28 @@
     $('btnRematch').disabled = !!waiting;
     $('rematchNote').style.color = 'var(--mute)';
     $('rematchNote').textContent = waiting ? 'Waiting for your opponent to accept...' : (msg.rematch && msg.rematch[1 - seat] ? 'Your opponent wants a rematch.' : '');
+    // bananas: only for games with a real opponent or the bot (never Pass & play)
+    var gain = $('bananaGain'); gain.hidden = true;
+    if (!hot && msg.gid != null) {
+      var kind = w === 'draw' ? 'draw' : (w === seat ? 'win' : 'loss');
+      var paid = awardBananas(msg.code + ':' + msg.gid, kind);
+      if (paid != null) {
+        gain.className = 'banana-gain ' + (paid > 0 ? 'plus' : 'minus');
+        gain.innerHTML = '<span class="bi">' + BANANA_SVG + '</span><b>' + (paid > 0 ? '+' : '-') + Math.abs(paid) + '</b> ' + (Math.abs(paid) === 1 ? 'banana' : 'bananas');
+        gain.hidden = false;
+      }
+    }
+    var pg = $('pointsGain'); pg.hidden = true;
+    if (session && session.kind === 'online' && msg.gid != null) {
+      var k2 = w === 'draw' ? 'draw' : (w === seat ? 'win' : 'loss');
+      var lastRound = v.last, emp = !!(lastRound && k2 === 'win' && lastRound.types[seat] === 'empress' && (lastRound.outcome === (seat === 0 ? 'win0' : 'win1')));
+      var pr = awardPoints(msg.code + ':' + msg.gid, k2, emp);
+      if (pr) {
+        pg.className = 'points-gain ' + (pr.delta > 0 ? 'plus' : 'minus');
+        pg.innerHTML = '<b>' + (pr.delta > 0 ? '+' : '-') + Math.abs(pr.delta) + '</b> points' + (pr.empress ? ' <small>Empress victory!</small>' : '');
+        pg.hidden = false;
+      }
+    }
     show('endOverlay', true);
   }
 
@@ -385,9 +480,9 @@
   function doJoin(code) {
     code = (code || '').toUpperCase().trim();
     if (code.length !== 4) return homeMsg('Enter the 4-letter room code.');
-    whenOpen(function () { netSend({ type: 'join', code: code, name: playerName() || 'Player 2' }); });
+    whenOpen(function () { netSend({ type: 'join', code: code, name: playerName() || 'Player 2', skins: equippedMap() }); });
   }
-  $('btnCreate').addEventListener('click', function () { whenOpen(function () { netSend({ type: 'create', name: playerName() || 'Player 1', isPublic: true }); }); });
+  $('btnCreate').addEventListener('click', function () { whenOpen(function () { netSend({ type: 'create', name: playerName() || 'Player 1', isPublic: true, skins: equippedMap() }); }); });
   $('btnJoin').addEventListener('click', function () { doJoin($('joinCode').value); });
   $('joinCode').addEventListener('keydown', function (e) { if (e.key === 'Enter') doJoin(this.value); });
   $('joinCode').addEventListener('input', function () { this.value = this.value.toUpperCase().replace(/[^A-Z]/g, ''); });
@@ -438,8 +533,196 @@
     });
   })();
 
+
+  // ---------- Shop ----------
+  var shopFilter = 'all';
+  function setBananaBalance(to) { var from = bananaBalance(); store.set('hc_bananas', String(to)); tweenBananas(from, to); }
+  function priceText(n) { return n === 0 ? 'Free' : fmtBananas(n); }
+
+  function openShop() {
+    show('home', false); show('shop', true);
+    window.scrollTo(0, 0);
+    renderShop(); refreshCatalog(renderShop);
+  }
+  function closeShop() { show('shop', false); show('home', true); }
+
+  function openPreview(piece, it) {
+    $('previewImg').innerHTML = ART.portrait(piece, it && it.id);
+    $('previewName').textContent = it ? it.name : 'Classic ' + E.PIECES[piece].name;
+    $('previewDesc').textContent = it ? (it.description || '') : ART.title(piece);
+    show('previewOverlay', true);
+  }
+
+  function equipSkin(piece, it) {
+    setEquipped(piece, it ? it.id : null);
+    toast((it ? it.name : 'Classic ' + E.PIECES[piece].name) + ' equipped');
+    renderShop();
+  }
+  function buySkin(it) {
+    if (isOwned(it.id)) return;
+    var bal = bananaBalance();
+    if (bal < it.price) { toast('Not enough bananas. You need ' + fmtBananas(it.price - bal) + ' more.'); return; }
+    if (!confirm('Buy ' + it.name + ' for ' + priceText(it.price) + (it.price ? ' bananas' : '') + '?')) return;
+    var owned = ownedList(); owned.push(it.id); store.set('hc_owned', JSON.stringify(owned));
+    if (it.price) setBananaBalance(bal - it.price);
+    setEquipped(it.piece, it.id);
+    toast(it.name + ' is yours and equipped!');
+    renderShop();
+  }
+
+  function shopCard(piece, it) {
+    var c = el('div', 'shopcard' + (it ? '' : ' classic'));
+    c.style.setProperty('--c', ART.color(piece));
+    var eq = equippedMap()[piece] || null;
+    var isEq = it ? eq === it.id : !eq;
+    var owned = !it || isOwned(it.id);
+    if (isEq) c.classList.add('equipped');
+    var pic = el('button', 'pic'); pic.type = 'button';
+    pic.setAttribute('aria-label', 'Preview ' + (it ? it.name : 'Classic ' + E.PIECES[piece].name));
+    pic.innerHTML = ART.portrait(piece, it && it.id);
+    pic.addEventListener('click', function () { openPreview(piece, it); });
+    c.appendChild(pic);
+    c.appendChild(el('span', 'ptag', E.PIECES[piece].name));
+    var body = el('div', 'sbody');
+    body.appendChild(el('b', 'sname', it ? it.name : 'Classic'));
+    if (it && it.description) body.appendChild(el('small', 'sdesc', it.description));
+    var act = el('div', 'sact');
+    if (owned) {
+      if (isEq) act.appendChild(el('span', 'badge-eq', 'Equipped'));
+      else { var b = el('button', 'btn small', 'Equip'); b.type = 'button'; b.addEventListener('click', function () { equipSkin(piece, it); }); act.appendChild(b); }
+      if (it && !isEq) body.appendChild(el('small', 'sowned', 'Owned'));
+    } else {
+      var poor = bananaBalance() < it.price;
+      var pr = el('span', 'price' + (poor ? ' poor' : ''));
+      var ic = el('span', 'bi'); ic.innerHTML = BANANA_SVG; pr.appendChild(ic); pr.appendChild(el('b', '', priceText(it.price)));
+      act.appendChild(pr);
+      var buy = el('button', 'btn small primary' + (poor ? ' poor' : ''), 'Buy'); buy.type = 'button';
+      buy.addEventListener('click', function () { buySkin(it); });
+      act.appendChild(buy);
+    }
+    body.appendChild(act);
+    c.appendChild(body);
+    return c;
+  }
+
+  function renderShop() {
+    var items = ART.items();
+    // filter chips
+    var fbox = $('shopFilters'); fbox.innerHTML = '';
+    [['all', 'All']].concat(E.ORDER.map(function (t) { return [t, E.PIECES[t].name]; })).forEach(function (f) {
+      var b = el('button', 'fchip' + (shopFilter === f[0] ? ' on' : ''), f[1]); b.type = 'button'; b.setAttribute('role', 'tab'); b.setAttribute('aria-selected', shopFilter === f[0]);
+      b.addEventListener('click', function () { shopFilter = f[0]; renderShop(); });
+      fbox.appendChild(b);
+    });
+    $('shopEmpty').hidden = items.length > 0;
+    var grid = $('shopGrid'); grid.innerHTML = '';
+    E.ORDER.forEach(function (piece) {
+      if (shopFilter !== 'all' && shopFilter !== piece) return;
+      grid.appendChild(shopCard(piece, null));
+      items.filter(function (it) { return it.piece === piece; }).sort(function (x, y) { return x.price - y.price; })
+        .forEach(function (it) { grid.appendChild(shopCard(piece, it)); });
+    });
+  }
+
+  $('btnShop').addEventListener('click', openShop);
+  $('btnShopBack').addEventListener('click', closeShop);
+  $('btnClosePreview').addEventListener('click', function () { show('previewOverlay', false); });
+
+
+  // ---------- Online save (account) ----------
+  function cloudRead() {
+    return { bananas: bananaBalance(), points: pointsTotal(), record: pointsRecord(), owned: ownedList(), equipped: equippedRaw(), bananaLast: store.get('hc_banana_last'), pointsLast: store.get('hc_points_last') };
+  }
+  function cloudWrite(d) {
+    store.set('hc_bananas', String(d.bananas)); store.set('hc_points', String(d.points)); store.set('hc_record', JSON.stringify(d.record));
+    store.set('hc_owned', JSON.stringify(d.owned)); store.set('hc_equipped', JSON.stringify(d.equipped));
+    if (d.bananaLast != null) store.set('hc_banana_last', d.bananaLast);
+    if (d.pointsLast != null) store.set('hc_points_last', d.pointsLast);
+    paintBananas(d.bananas); paintPoints();
+    if (!$('shop').hidden) renderShop();
+  }
+  function summaryText(d) {
+    var r = d.record || {}, n = (d.owned || []).length;
+    return fmtBananas(d.bananas || 0) + ' bananas, ' + fmtPts(d.points || 0) + ' pts, ' + (r.w || 0) + 'W ' + (r.l || 0) + 'L ' + (r.d || 0) + 'D, ' + n + (n === 1 ? ' skin' : ' skins');
+  }
+  var acctMode = 'in', acctPending = null;
+  function ago(t) {
+    if (!t) return '';
+    var m = Math.round((Date.now() - t) / 60000);
+    return m < 1 ? 'just now' : m < 60 ? m + ' min ago' : Math.round(m / 60) + ' h ago';
+  }
+  function acctMsg(t, good) { var m = $('acctMsg'); m.textContent = t || ''; m.style.color = good ? 'var(--win)' : 'var(--lose)'; }
+  function renderAccount() {
+    var signed = window.HCSync.signedIn(), st = window.HCSync.state();
+    $('acctLabel').textContent = signed ? window.HCSync.username() : 'Sign in';
+    $('acctDot').className = 'acct-dot ' + (!signed ? '' : st.status === 'error' ? 'bad' : st.status === 'syncing' ? 'busy' : 'good');
+    var pending = !!acctPending;
+    $('acctOut').hidden = signed || pending; $('acctChoice').hidden = !pending; $('acctIn').hidden = !signed || pending;
+    if (signed) {
+      $('acctName').textContent = window.HCSync.username();
+      $('acctStatus').textContent = st.status === 'syncing' ? 'Syncing...' : st.status === 'error' ? 'Could not sync: ' + st.error + ' Your progress is safe on this device and will retry.' : 'Saved online' + (st.lastOk ? ' (' + ago(st.lastOk) + ')' : '') + '. Changes upload automatically.';
+      $('acctSummary').textContent = summaryText(cloudRead());
+    }
+    var reg = acctMode === 'new';
+    $('acctTabIn').className = reg ? '' : 'on'; $('acctTabNew').className = reg ? 'on' : '';
+    $('acctGo').textContent = reg ? 'Create account' : 'Sign in';
+    $('acctHint').hidden = !reg;
+    $('acctPass').setAttribute('autocomplete', reg ? 'new-password' : 'current-password');
+  }
+  function acctBusy(on) { ['acctGo', 'acctSync', 'acctOutBtn', 'acctDel', 'chCloud', 'chBoth', 'chDevice'].forEach(function (id) { $(id).disabled = on; }); }
+  function openAccount() { acctMsg(''); acctPending = null; renderAccount(); show('accountOverlay', true); if (window.HCSync.signedIn()) window.HCSync.syncNow(); }
+  function afterAuth(res) {
+    if (res && res.choice) {
+      acctPending = res; $('cmpLocal').textContent = summaryText(res.local); $('cmpCloud').textContent = summaryText(res.cloud);
+      acctMsg(''); renderAccount(); return;
+    }
+    acctPending = null; $('acctPass').value = ''; acctMsg('You are signed in. Your progress is saved online.', true); renderAccount();
+  }
+  $('btnAccount').addEventListener('click', openAccount);
+  $('btnAcctClose').addEventListener('click', function () { show('accountOverlay', false); });
+  $('acctTabIn').addEventListener('click', function () { acctMode = 'in'; acctMsg(''); renderAccount(); });
+  $('acctTabNew').addEventListener('click', function () { acctMode = 'new'; acctMsg(''); renderAccount(); });
+  $('acctOut').addEventListener('submit', function (e) {
+    e.preventDefault();
+    var u = $('acctUser').value.trim(), p = $('acctPass').value;
+    if (!u || !p) { acctMsg('Enter a username and password.'); return; }
+    acctBusy(true); acctMsg('Please wait...', true);
+    var go = acctMode === 'new' ? window.HCSync.register(u, p) : window.HCSync.login(u, p);
+    go.then(afterAuth, function (err) { acctMsg(err.message); }).then(function () { acctBusy(false); renderAccount(); });
+  });
+  function choose(kind) {
+    var pend = acctPending; if (!pend) return;
+    acctBusy(true); acctMsg('Saving...', true);
+    window.HCSync.resolve(kind, pend).then(function () { acctPending = null; $('acctPass').value = ''; acctMsg('Done. Your progress is saved online.', true); }, function (err) { acctMsg(err.message); })
+      .then(function () { acctBusy(false); renderAccount(); });
+  }
+  $('chCloud').addEventListener('click', function () { choose('cloud'); });
+  $('chBoth').addEventListener('click', function () { choose('both'); });
+  $('chDevice').addEventListener('click', function () { choose('device'); });
+  $('acctSync').addEventListener('click', function () {
+    acctBusy(true); acctMsg('Syncing...', true);
+    window.HCSync.syncNow().then(function () { var st = window.HCSync.state(); acctMsg(st.status === 'error' ? st.error : 'Up to date.', st.status !== 'error'); acctBusy(false); renderAccount(); });
+  });
+  $('acctOutBtn').addEventListener('click', function () {
+    acctBusy(true);
+    window.HCSync.logout().then(function () { acctMsg('Signed out. Your progress stays on this device.', true); acctBusy(false); renderAccount(); });
+  });
+  $('acctDel').addEventListener('click', function () {
+    var pw = window.prompt('Delete your online account? Your progress stays on this device, but the online copy is erased for good.\n\nType your password to confirm:');
+    if (!pw) return;
+    acctBusy(true);
+    window.HCSync.deleteAccount(pw).then(function () { acctMsg('Account deleted.', true); }, function (err) { acctMsg(err.message); }).then(function () { acctBusy(false); renderAccount(); });
+  });
+
   // ---------- Boot ----------
   $('name').value = store.get('hc_name');
+  $('bananaIcon').innerHTML = BANANA_SVG; $('shopBtnIcon').innerHTML = BANANA_SVG; paintBananas(bananaBalance()); paintPoints();
+  ART.setCatalog(window.HC_CATALOG || { items: [] }, 'shop/');
+  refreshCatalog();
+  window.HCSync.init({ base: httpBase, read: cloudRead, write: cloudWrite, store: store,
+    onChange: function () { renderAccount(); },
+    onNotice: function (t) { toast(t); } });
+  renderAccount();
   // Show the server box only as a hint when not hosted by the game server
   if (/^https?:$/.test(location.protocol) && location.hostname !== 'appassets.androidplatform.net') $('btnServer').hidden = true;
   if (wsUrl()) {
@@ -452,8 +735,9 @@
 
   // Android back button / browser back: close overlays first, then offer to leave the game.
   window.__hcBack = function () {
-    var ids = ['rulesOverlay', 'historyOverlay', 'serverOverlay'];
+    var ids = ['previewOverlay', 'rulesOverlay', 'historyOverlay', 'serverOverlay', 'accountOverlay'];
     for (var i = 0; i < ids.length; i++) { if (!$(ids[i]).hidden) { show(ids[i], false); return true; } }
+    if (!$('shop').hidden) { closeShop(); return true; }
     if (!$('endOverlay').hidden) { goHome(); return true; }
     if (session) { if (confirm('Leave this game?')) goHome(); return true; }
     return false;
