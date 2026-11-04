@@ -17,7 +17,8 @@
   // ---- shop catalog: alternate artwork ("skins"), one piece per skin ----
   var catalog = { items: [], base: '' }, byId = {};
   function setCatalog(cat, base) {
-    catalog.items = (cat && Array.isArray(cat.items)) ? cat.items : [];
+    // The catalog can come from a remote file, so only accept well-formed entries (image must be a plain art/ file name).
+    catalog.items = (cat && Array.isArray(cat.items)) ? cat.items.filter(function (it) { return it && /^[a-z0-9-]{1,48}$/.test(String(it.id)) && /^art\/[a-z0-9._-]+$/.test(String(it.image)); }) : [];
     catalog.base = base || '';
     byId = {};
     catalog.items.forEach(function (it) { if (it && it.id && META[it.piece]) byId[it.id] = it; });

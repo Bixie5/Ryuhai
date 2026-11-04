@@ -17,7 +17,12 @@
   // ---------- Bananas (per-device currency) ----------
   // win +100, draw +50, loss -50. Paid once per finished game (online and vs Bot; not Pass & play).
   var BANANA_SVG = '<svg viewBox="0 0 32 32" aria-hidden="true"><path d="M7 5.5C5.4 6.6 5.8 8.6 6.3 10.8 8 20.5 15 28 26 27.2c1.7-.2 2.4-1.8 1-2.7C19 23.4 13.8 18 12.4 10 12 7.4 9.3 3.9 7 5.5z" fill="#ffd93b" stroke="#5e3f00" stroke-width="1.6" stroke-linejoin="round"/><path d="M6.6 5.6 5.2 3.4" stroke="#5e3f00" stroke-width="2.6" stroke-linecap="round"/><path d="M9.2 9.5c1.6 7.8 6 13.2 13.3 15.6" fill="none" stroke="#fff7b0" stroke-width="1.5" stroke-linecap="round" opacity=".85"/><path d="M25.4 27.1l2.3-.4" stroke="#5e3f00" stroke-width="2.4" stroke-linecap="round"/></svg>';
-  var BANANA_VALUE = { win: 100, draw: 50, loss: -50 };
+  var BANANA_VALUE = { win: 100, draw: 50, loss: -50 };                       // online games
+  var BOT_BANANAS = {                                                          // games against the Bot, by level
+    easy:   { win: 0,   draw: 0, loss: 0 },
+    normal: { win: 50,  draw: 0, loss: -50 },
+    hard:   { win: 100, draw: 0, loss: -50 }
+  };
   var bananaShown = 0;
   function bananaBalance() { var n = parseInt(store.get('hc_bananas'), 10); return isNaN(n) ? 0 : n; }
   function fmtBananas(n) { return (n < 0 ? '-' : '') + Math.abs(n).toLocaleString('en-US'); }
@@ -56,10 +61,10 @@
   }
 
   // Returns the amount paid, or null if this game was already paid out.
-  function awardBananas(gameKey, kind) {
+  function awardBananas(gameKey, kind, table) {
     if (!gameKey || store.get('hc_banana_last') === gameKey) return null;
     store.set('hc_banana_last', gameKey);
-    var delta = BANANA_VALUE[kind], from = bananaBalance(), to = from + delta;
+    var delta = (table || BANANA_VALUE)[kind], from = bananaBalance(), to = from + delta;
     store.set('hc_bananas', String(to));
     tweenBananas(from, to);
     return delta;
@@ -87,13 +92,31 @@
     var u = wsUrl();
     return u ? u.replace(/^ws/, 'http').replace(/\/ws$/, '/') : null;
   }
+  // The shop list comes from, in order: the always-on remote copy (HC_CONFIG.shopUrl, e.g. on GitHub), the game server,
+  // then the last copy this device saved, then the one bundled in the app. It is fetched every time the game opens.
+  function remoteShopBase() {
+    var u = window.HC_CONFIG && window.HC_CONFIG.shopUrl;
+    if (!u || typeof u !== 'string') return null;
+    return /^(https:\/\/|http:\/\/(localhost|127\.0\.0\.1)(:\d+)?\/)/.test(u) ? u.replace(/\/*$/, '/') : null;
+  }
+  function cacheCatalog(j, base) { try { store.set('hc_catalog_cache', JSON.stringify({ base: base, j: j })); } catch (e) {} }
+  function applyCachedCatalog() {
+    try { var c = JSON.parse(store.get('hc_catalog_cache')); if (c && c.j && typeof c.base === 'string') { ART.setCatalog(c.j, c.base); return true; } } catch (e) {}
+    return false;
+  }
   function refreshCatalog(done) {
-    var base = httpBase();
-    if (base === null || typeof fetch !== 'function') { if (done) done(); return; }
-    fetch(base + 'shop/catalog.json?t=' + Date.now(), { cache: 'no-store' })
-      .then(function (r) { if (!r.ok) throw new Error('bad'); return r.json(); })
-      .then(function (j) { ART.setCatalog(j, base + 'shop/'); if (done) done(); })
-      .catch(function () { if (done) done(); });
+    var sources = [], remote = remoteShopBase(), srv = httpBase();
+    if (remote) sources.push(remote);
+    if (srv !== null) sources.push(srv + 'shop/');
+    if (!sources.length || typeof fetch !== 'function') { if (done) done(); return; }
+    var stamp = Math.floor(Date.now() / 60000);
+    (function next(i) {
+      if (i >= sources.length) { if (done) done(); return; }
+      fetch(sources[i] + 'catalog.json?t=' + stamp, { cache: 'no-store' })
+        .then(function (r) { if (!r.ok) throw new Error('bad'); return r.json(); })
+        .then(function (j) { if (!j || !Array.isArray(j.items)) throw new Error('bad'); ART.setCatalog(j, sources[i]); cacheCatalog(j, sources[i]); if (done) done(); })
+        .catch(function () { next(i + 1); });
+    })(0);
   }
 
   // ---------- UI state ----------
@@ -120,12 +143,20 @@
   function serverAddress() {
     var hosted = /^https?:$/.test(location.protocol) && location.host && location.hostname !== 'appassets.androidplatform.net';
     if (hosted) return location.host;
-    return store.get('hc_server');
+    return store.get('hc_server') || (window.HC_CONFIG && window.HC_CONFIG.server) || '';
+  }
+  // A bare internet host name (no port, not an IP, not localhost) is reached securely (wss/https), as hosting services require.
+  function looksPublic(a) {
+    var h = a.replace(/^[a-z]+:\/\//i, '').replace(/\/.*$/, '');
+    if (/:\d+$/.test(h)) return false;
+    if (/^\d{1,3}(\.\d{1,3}){3}$/.test(h) || /^localhost$/i.test(h) || /\.(local|lan|home|internal)$/i.test(h) || h.indexOf('.') === -1) return false;
+    return true;
   }
   function wsUrl() {
     var a = serverAddress();
     if (!a) return '';
-    var secure = /^https:\/\//.test(a) || (location.protocol === 'https:' && !/^http:\/\//.test(a) && !/^ws:\/\//.test(a));
+    var explicit = /^(https|wss):\/\//.test(a) ? true : /^(http|ws):\/\//.test(a) ? false : null;
+    var secure = explicit !== null ? explicit : (location.protocol === 'https:' || looksPublic(a));
     a = a.replace(/^(https?|wss?):\/\//, '').replace(/\/+$/, '');
     return (secure ? 'wss://' : 'ws://') + a + '/ws';
   }
@@ -199,14 +230,14 @@
   }
 
   // ---------- Local sessions (bot / pass & play) ----------
-  function localSession(kind) {
-    var s = { kind: kind, gid: null, game: null, picks: [null, null], viewSeat: 0, cover: null, phase: 'pick' };
+  function localSession(kind, level) {
+    var s = { kind: kind, level: level || 'normal', gid: null, game: null, picks: [null, null], viewSeat: 0, cover: null, phase: 'pick' };
     var names = kind === 'bot' ? [playerName() || 'Player', 'The Bot'] : ['Player 1', 'Player 2'];
     function emit() {
       if (session !== s) return;
       var locked = [s.picks[0] != null, s.picks[1] != null];
       render({
-        code: kind === 'bot' ? 'BOT' : 'LOCAL', names: names, connected: [true, true], started: true, rematch: [false, false],
+        code: kind === 'bot' ? 'BOT \u00b7 ' + s.level.toUpperCase() : 'LOCAL', names: names, connected: [true, true], started: true, rematch: [false, false],
         view: E.viewFor(s.game, s.viewSeat, locked), cover: s.cover, phase: s.phase, next: null, gid: kind === 'bot' ? s.gid : null
       });
     }
@@ -227,7 +258,7 @@
       s.picks[seat] = idOfType(seat, type);
       if (kind === 'bot') {
         emit();
-        setTimeout(function () { s.picks[1] = E.botPick(s.game, 1); resolve(); emit(); }, 700 + Math.random() * 600);
+        setTimeout(function () { s.picks[1] = E.botPick(s.game, 1, null, s.level); resolve(); emit(); }, 700 + Math.random() * 600);
       } else if (seat === 0) {
         s.viewSeat = 1; s.cover = { title: 'Pass to ' + names[1], text: names[0] + ' has locked in. Hand the device to ' + names[1] + ', then tap Ready.', btn: 'I am ' + names[1] };
         emit();
@@ -253,7 +284,7 @@
   function startSession(s) {
     session = s; selType = null; myPick = null; lastRoundSeen = 0; lastMsg = null; arenaSig = '';
     show('home', false); show('game', true); show('endOverlay', false);
-    $('roomCode').textContent = s.kind === 'online' ? '----' : (s.kind === 'bot' ? 'Bot' : 'Local');
+    $('roomCode').textContent = s.kind === 'online' ? '----' : (s.kind === 'bot' ? 'Bot \u00b7 ' + ({ easy: 'Easy', normal: 'Normal', hard: 'Hard' }[s.level] || 'Normal') : 'Local');
     if (s.start) s.start();
     else render({ code: '----', names: ['You', 'Waiting...'], connected: [true, false], started: false, view: null });
   }
@@ -441,8 +472,13 @@
     var gain = $('bananaGain'); gain.hidden = true;
     if (!hot && msg.gid != null) {
       var kind = w === 'draw' ? 'draw' : (w === seat ? 'win' : 'loss');
-      var paid = awardBananas(msg.code + ':' + msg.gid, kind);
-      if (paid != null) {
+      var table = session && session.kind === 'bot' ? (BOT_BANANAS[session.level] || BOT_BANANAS.normal) : null;
+      var paid = awardBananas(msg.code + ':' + msg.gid, kind, table);
+      if (paid === 0) {
+        gain.className = 'banana-gain zero';
+        gain.innerHTML = '<span class="bi">' + BANANA_SVG + '</span><span>' + (table && session.level === 'easy' ? 'No bananas at Easy level' : 'No bananas this time') + '</span>';
+        gain.hidden = false;
+      } else if (paid != null) {
         gain.className = 'banana-gain ' + (paid > 0 ? 'plus' : 'minus');
         gain.innerHTML = '<span class="bi">' + BANANA_SVG + '</span><b>' + (paid > 0 ? '+' : '-') + Math.abs(paid) + '</b> ' + (Math.abs(paid) === 1 ? 'banana' : 'bananas');
         gain.hidden = false;
@@ -486,7 +522,19 @@
   $('btnJoin').addEventListener('click', function () { doJoin($('joinCode').value); });
   $('joinCode').addEventListener('keydown', function (e) { if (e.key === 'Enter') doJoin(this.value); });
   $('joinCode').addEventListener('input', function () { this.value = this.value.toUpperCase().replace(/[^A-Z]/g, ''); });
-  $('btnBot').addEventListener('click', function () { startSession(localSession('bot')); });
+  function openBotChoice() {
+    var last = store.get('hc_bot_level') || 'normal';
+    Array.prototype.forEach.call(document.querySelectorAll('#botOverlay .lvl'), function (b) { b.classList.toggle('last', b.getAttribute('data-level') === last); });
+    show('botOverlay', true);
+  }
+  $('btnBot').addEventListener('click', openBotChoice);
+  $('btnBotCancel').addEventListener('click', function () { show('botOverlay', false); });
+  Array.prototype.forEach.call(document.querySelectorAll('#botOverlay .lvl'), function (b) {
+    b.addEventListener('click', function () {
+      var lv = b.getAttribute('data-level'); store.set('hc_bot_level', lv);
+      show('botOverlay', false); startSession(localSession('bot', lv));
+    });
+  });
   $('btnHotseat').addEventListener('click', function () { startSession(localSession('hotseat')); });
   $('btnLock').addEventListener('click', function () {
     if (!session || !selType || !lastMsg || !lastMsg.view || lastMsg.view.locked.you) return;
@@ -717,8 +765,9 @@
   // ---------- Boot ----------
   $('name').value = store.get('hc_name');
   $('bananaIcon').innerHTML = BANANA_SVG; $('shopBtnIcon').innerHTML = BANANA_SVG; paintBananas(bananaBalance()); paintPoints();
-  ART.setCatalog(window.HC_CATALOG || { items: [] }, 'shop/');
-  refreshCatalog();
+  // Start from what this device saved last time (so skins show instantly, even offline), else the bundled list; then refresh.
+  if (!applyCachedCatalog()) ART.setCatalog(window.HC_CATALOG || { items: [] }, 'shop/');
+  refreshCatalog(function () { if (!$('shop').hidden) renderShop(); });
   window.HCSync.init({ base: httpBase, read: cloudRead, write: cloudWrite, store: store,
     onChange: function () { renderAccount(); },
     onNotice: function (t) { toast(t); } });
@@ -735,12 +784,12 @@
 
   // Android back button / browser back: close overlays first, then offer to leave the game.
   window.__hcBack = function () {
-    var ids = ['previewOverlay', 'rulesOverlay', 'historyOverlay', 'serverOverlay', 'accountOverlay'];
+    var ids = ['previewOverlay', 'rulesOverlay', 'historyOverlay', 'serverOverlay', 'accountOverlay', 'botOverlay'];
     for (var i = 0; i < ids.length; i++) { if (!$(ids[i]).hidden) { show(ids[i], false); return true; } }
     if (!$('shop').hidden) { closeShop(); return true; }
     if (!$('endOverlay').hidden) { goHome(); return true; }
     if (session) { if (confirm('Leave this game?')) goHome(); return true; }
     return false;
   };
-  window.__hc = { get session() { return session; }, get last() { return lastMsg; } };
+  window.__hc = { wsUrl: wsUrl, get session() { return session; }, get last() { return lastMsg; } };
 })();

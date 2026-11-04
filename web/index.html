@@ -162,6 +162,18 @@
     </div>
   </div>
 
+  <div id="botOverlay" class="overlay" hidden>
+    <div class="sheet">
+      <h2>Choose the Bot</h2>
+      <div class="stack">
+        <button class="btn lvl" data-level="easy"><b>Easy</b><small>Plays loosely and often at random. Good for learning the pieces. No bananas.</small></button>
+        <button class="btn lvl" data-level="normal"><b>Normal</b><small>Plays sensibly and slowly picks up your habits. Win +50, loss -50.</small></button>
+        <button class="btn lvl hot" data-level="hard"><b>Hard</b><small>Reads your habits quickly and mixes its moves so you cannot read it. Win +100, loss -50.</small></button>
+      </div>
+      <button id="btnBotCancel" class="btn ghost">Cancel</button>
+    </div>
+  </div>
+
   <div id="accountOverlay" class="overlay" hidden>
     <div class="sheet">
       <h2>Online save</h2>
@@ -211,7 +223,7 @@
   <div id="serverOverlay" class="overlay" hidden>
     <div class="sheet">
       <h2>Server</h2>
-      <p class="small">Online and room play connect to a Ryuhai server. When you open the game from the server's own address this is filled in for you. In the Android app, type the address shown when the server starts, for example <code>192.168.1.20:3000</code>.</p>
+      <p class="small">Online and room play connect to a Ryuhai server. When you open the game from the server's own address this is filled in for you. On the same Wi-Fi type the address shown when the server starts, for example <code>192.168.1.20:3000</code>. Over the internet type the public address of your hosted server, for example <code>ryuhai.onrender.com</code>.</p>
       <label class="field"><span>Server address</span><input id="serverInput" placeholder="192.168.1.20:3000" autocapitalize="off" autocomplete="off"></label>
       <div class="row split">
         <button id="btnServerSave" class="btn primary">Save</button>
@@ -226,6 +238,7 @@
 <script src="shared/engine.js"></script>
 <script src="pieces.js"></script>
 <script src="shop/catalog.js"></script>
+<script src="config.js"></script>
 <script src="sync.js"></script>
 <script src="app.js"></script>
 </body>

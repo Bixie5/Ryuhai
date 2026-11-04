@@ -314,3 +314,11 @@ img.art.face{object-position:50% 50%}
 .acct-cmp>div{flex:1;background:#120d28;border:1px solid var(--line);border-radius:10px;padding:10px;display:flex;flex-direction:column;gap:4px;font-size:13px;line-height:1.35}
 .acct-cmp b{color:var(--cyan);font-size:12px;letter-spacing:.08em;text-transform:uppercase}
 .link.danger{color:#ff8a9b}
+
+/* ---- bot difficulty ---- */
+.btn.lvl{display:flex;flex-direction:column;align-items:flex-start;gap:3px;text-align:left;text-transform:none;letter-spacing:0}
+.btn.lvl b{font-size:18px;font-style:italic;text-transform:uppercase;letter-spacing:.04em}
+.btn.lvl small{font-size:13px;font-weight:500;opacity:.8;line-height:1.3;font-style:normal}
+.btn.lvl.last{outline:2px solid var(--cyan);outline-offset:2px}
+.btn.lvl.hot{background:linear-gradient(90deg,var(--neon),var(--gold2));color:#2a1200}
+.banana-gain.zero{font-size:14px;color:var(--mute);opacity:.9}

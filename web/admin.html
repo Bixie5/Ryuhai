@@ -43,6 +43,11 @@
   .empty{color:var(--mute);text-align:center;padding:26px 10px}
   #gate{max-width:420px;margin:12vh auto}
   .count{color:var(--mute);font-weight:400}
+  .dot{display:inline-block;width:10px;height:10px;border-radius:50%;background:#5a5380;margin-right:8px;vertical-align:middle}
+  .dot.ok{background:var(--ok);box-shadow:0 0 8px var(--ok)}.dot.busy{background:var(--gold)}.dot.err{background:var(--bad);box-shadow:0 0 8px var(--bad)}
+  code,.mono{font-family:ui-monospace,Menlo,Consolas,monospace;font-size:13px;word-break:break-all}
+  .urlbox{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-top:6px}
+  .urlbox .mono{flex:1;min-width:200px;background:#0b0820;border:1px solid var(--line);border-radius:8px;padding:8px 10px}
 </style>
 </head>
 <body>
@@ -60,6 +65,19 @@
   </div>
 
   <div id="app" hidden>
+    <section class="card" id="remoteCard">
+      <h2>Always-on copy <span id="remoteTitle" class="count"></span></h2>
+      <p id="remoteLine"></p>
+      <div id="remoteOn" hidden>
+        <p class="hint" style="max-width:none">Players' games load the shop from this address every time they open, so new skins appear even when this computer is off. Paste it into <code>web/config.js</code> as <code>shopUrl</code> (once), then rebuild the app.</p>
+        <div class="urlbox"><span id="remoteUrl" class="mono"></span><button id="remoteCopy">Copy</button><button id="remoteSync" class="primary">Sync now</button></div>
+        <p class="hint">New skins can take up to a minute to show up for players.</p>
+      </div>
+      <div id="remoteOff" hidden>
+        <p class="hint" style="max-width:none">Right now skins are saved on this computer only, so they only appear in the game while this computer's server is running. To keep them available all the time, set up the free GitHub copy: make a public repository, create an access token for it, and start the server with <code>REMOTE_GITHUB_REPO</code> and <code>REMOTE_GITHUB_TOKEN</code> set. Step by step in <code>DEPLOY.md</code> (section "Always-on shop").</p>
+      </div>
+    </section>
+
     <section class="card">
       <h2>Add a skin</h2>
       <div class="grid">
@@ -213,7 +231,7 @@
     btn.disabled = true; say($('addMsg'), 'Saving...');
     api('POST', 'items', { piece: $('fPiece').value, name: $('fName').value, price: Number(price), description: $('fDesc').value, faceCenter: face, image: imageB64 })
       .then(function (j) {
-        say($('addMsg'), 'Added "' + j.item.name + '" to the shop.', 'ok');
+        say($('addMsg'), 'Added "' + j.item.name + '" to the shop.', 'ok'); paintRemote(j.remote); remoteTimer = setTimeout(loadRemote, 800);
         $('fName').value = ''; $('fDesc').value = ''; $('fFile').value = ''; imageB64 = null; previewUrl = null;
         var s = $('stage'); s.classList.remove('has'); s.style.backgroundImage = 'none'; s.firstChild.textContent = 'Choose an image first'; s.style.aspectRatio = '3 / 4'; paintFace();
         load();
@@ -254,10 +272,38 @@
       var box = $('items'); box.innerHTML = '';
       j.items.forEach(function (it) { box.appendChild(itemCard(it)); });
       $('empty').hidden = j.items.length > 0;
+      paintRemote(j.remote);
       $('count').textContent = j.items.length ? '(' + j.items.length + ')' : '';
       if (!keepMsg) say($('listMsg'), '');
     }).catch(function (e) { say($('listMsg'), e.message, 'err'); });
   }
+
+  // ----- always-on copy status -----
+  var remoteTimer = null;
+  function ago(t) { if (!t) return ''; var m = Math.round((Date.now() - t) / 60000); return m < 1 ? 'just now' : m < 60 ? m + ' min ago' : Math.round(m / 60) + ' h ago'; }
+  function paintRemote(r) {
+    if (!r) return;
+    var line = $('remoteLine'), dot, text;
+    $('remoteOn').hidden = !r.enabled; $('remoteOff').hidden = r.enabled;
+    if (!r.enabled) { dot = ''; text = 'Not connected'; }
+    else if (r.state === 'syncing') { dot = 'busy'; text = 'Uploading to GitHub...'; }
+    else if (r.state === 'error') { dot = 'err'; text = 'Could not upload: ' + r.error + ' Your skins are still saved on this computer.'; }
+    else { dot = 'ok'; text = 'Up to date with ' + r.repo + (r.lastOk ? ' (' + ago(r.lastOk) + ')' : ''); }
+    line.innerHTML = '<span class="dot ' + dot + '"></span>';
+    line.appendChild(document.createTextNode(text));
+    $('remoteTitle').textContent = r.enabled ? '' : '(off)';
+    if (r.enabled) $('remoteUrl').textContent = r.url;
+    clearTimeout(remoteTimer);
+    if (r.enabled && (r.state === 'syncing' || r.state === 'idle')) remoteTimer = setTimeout(loadRemote, 1500);
+  }
+  function loadRemote() { api('GET', 'remote').then(function (j) { paintRemote(j.remote); }).catch(function () {}); }
+  $('remoteSync').addEventListener('click', function () { api('POST', 'remote/sync', {}).then(function (j) { paintRemote(j.remote); remoteTimer = setTimeout(loadRemote, 800); }).catch(function (e) { say($('listMsg'), e.message, 'err'); }); });
+  $('remoteCopy').addEventListener('click', function () {
+    var t = $('remoteUrl').textContent, b = this;
+    function done() { b.textContent = 'Copied'; setTimeout(function () { b.textContent = 'Copy'; }, 1500); }
+    if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(t).then(done, function () {});
+    else { var r = document.createRange(); r.selectNodeContents($('remoteUrl')); var sel = getSelection(); sel.removeAllRanges(); sel.addRange(r); }
+  });
 
   paintFace();
   if (key) unlock(); else $('gate').hidden = false;
