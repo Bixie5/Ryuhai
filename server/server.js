@@ -8,6 +8,7 @@ const { WebSocketServer } = require('ws');
 const E = require('../shared/engine');
 const { createAccounts } = require('./accounts');
 const { createShop } = require('./shop');
+const { createRemote, fromEnv } = require('./remote');
 
 const ROOT = path.join(__dirname, '..');
 const MIME = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8',
@@ -18,7 +19,24 @@ function createServer(opts) {
   const rooms = new Map(); // code -> room
   const ROOM_TTL = 1000 * 60 * 60 * 3;
 
-  const shop = createShop(opts.shopDir || path.join(ROOT, 'web', 'shop'));
+  // DATA_DIR puts everything that changes while the server runs (accounts, shop skins) in one folder, so one disk/volume keeps it all.
+  const dataDir = process.env.DATA_DIR || '';
+  const shopDir = opts.shopDir || (dataDir ? path.join(dataDir, 'shop') : path.join(ROOT, 'web', 'shop'));
+  const shop = createShop(shopDir);
+  // Optional free always-on copy of the shop on GitHub (see server/remote.js). Off unless configured.
+  const remote = opts.remote || fromEnv();
+  remote.attach(() => shop.list(), (rel) => shop.readImage(rel));
+  if (remote.enabled) {
+    // A fresh or wiped computer/host: rebuild the local shop from the remote copy first, so nothing is lost.
+    const boot = shop.list().length ? remote.request() : remote.fetchAll().then((all) => {
+      const n = shop.importAll(all.items, all.images);
+      if (n) console.log('Restored ' + n + ' skin(s) from the remote shop.');
+      // If some remote skins could not be downloaded, do NOT push: that would erase them from the remote copy.
+      if (n < all.items.length) throw new Error('only ' + n + ' of ' + all.items.length + ' remote skins could be restored, so nothing was pushed. Restart to try again.');
+      return remote.request();
+    });
+    Promise.resolve(boot).catch((e) => console.error('Remote shop sync failed:', e.message));
+  }
   // Key for the admin page. Set ADMIN_KEY in the environment to keep it the same between runs.
   const adminKey = opts.adminKey || process.env.ADMIN_KEY || crypto.randomBytes(8).toString('hex');
   const keyOk = (k) => { const a = Buffer.from(String(k || '')), b = Buffer.from(adminKey); return a.length === b.length && crypto.timingSafeEqual(a, b); };
@@ -26,18 +44,22 @@ function createServer(opts) {
 
   function adminApi(req, res, url) {
     if (!keyOk(req.headers['x-admin-key'])) return json(res, 401, { error: 'Wrong or missing admin key.' });
-    const m = url.match(/^\/api\/admin\/(items|check)(?:\/([a-z0-9-]+))?$/);
+    const m = url.match(/^\/api\/admin\/(items|check|remote)(?:\/([a-z0-9-]+))?$/);
     if (!m) return json(res, 404, { error: 'Not found' });
     if (m[1] === 'check') return json(res, 200, { ok: true });
+    if (m[1] === 'remote') {
+      if (req.method === 'POST' && m[2] === 'sync') { remote.request(); return json(res, 200, { remote: remote.status() }); }
+      return json(res, 200, { remote: remote.status() });
+    }
     const id = m[2];
-    if (req.method === 'GET' && !id) return json(res, 200, { items: shop.list(), pieces: shop.PIECES });
-    if (req.method === 'DELETE' && id) { try { shop.deleteItem(id); return json(res, 200, { ok: true }); } catch (e) { return json(res, e.status || 500, { error: e.message }); } }
+    if (req.method === 'GET' && !id) return json(res, 200, { items: shop.list(), pieces: shop.PIECES, remote: remote.status() });
+    if (req.method === 'DELETE' && id) { try { shop.deleteItem(id); remote.request(); return json(res, 200, { ok: true, remote: remote.status() }); } catch (e) { return json(res, e.status || 500, { error: e.message }); } }
     if ((req.method === 'POST' && !id) || (req.method === 'PUT' && id)) {
       let size = 0; const chunks = [];
       req.on('data', (c) => { size += c.length; if (size > 8 * 1024 * 1024) { json(res, 413, { error: 'Upload too large.' }); req.destroy(); } else chunks.push(c); });
       req.on('end', () => {
         let body; try { body = JSON.parse(Buffer.concat(chunks).toString('utf8')); } catch (e) { return json(res, 400, { error: 'Bad request.' }); }
-        try { const item = id ? shop.updateItem(id, body) : shop.addItem(body); return json(res, 200, { item: item }); }
+        try { const item = id ? shop.updateItem(id, body) : shop.addItem(body); remote.request(); return json(res, 200, { item: item, remote: remote.status() }); }
         catch (e) { return json(res, e.status || 500, { error: e.status ? e.message : 'Could not save.' }); }
       });
       return;
@@ -46,13 +68,15 @@ function createServer(opts) {
   }
 
   // ---------- player accounts (cloud save) ----------
-  const accounts = createAccounts(opts.accountsFile || process.env.ACCOUNTS_FILE || path.join(ROOT, 'data', 'accounts.json'));
+  const accounts = createAccounts(opts.accountsFile || process.env.ACCOUNTS_FILE || path.join(dataDir || path.join(ROOT, 'data'), 'accounts.json'));
   const CORS = { 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Headers': 'Content-Type, Authorization', 'Access-Control-Allow-Methods': 'GET, POST, PUT, DELETE, OPTIONS', 'Access-Control-Max-Age': '600' };
   const cjson = (res, status, obj) => { res.writeHead(status, Object.assign({ 'Content-Type': 'application/json', 'Cache-Control': 'no-store' }, CORS)); res.end(JSON.stringify(obj)); };
   function accountApi(req, res, url) {
     if (req.method === 'OPTIONS') { res.writeHead(204, CORS); return res.end(); }
     const route = url.slice('/api/account/'.length);
-    const ip = req.socket.remoteAddress || '?';
+    // Behind a proxy (Render, Fly, Cloudflare...) every request arrives from the proxy, so read the real client address when told to trust it.
+    const fwd = process.env.TRUST_PROXY ? String(req.headers['x-forwarded-for'] || '').split(',')[0].trim() : '';
+    const ip = fwd || req.socket.remoteAddress || '?';
     const bearer = String(req.headers.authorization || '').replace(/^Bearer\s+/i, '');
     const fail = (e) => cjson(res, e.status || 500, Object.assign({ error: e.status ? e.message : 'Something went wrong.' }, e.extra || {}));
     const run = (fn) => { Promise.resolve().then(fn).then((r) => cjson(res, 200, r || { ok: true }), fail); };
@@ -86,8 +110,9 @@ function createServer(opts) {
     let file;
     if (url.startsWith('/shared/')) file = path.join(ROOT, url);
     else if (url.startsWith('/web/')) file = path.join(ROOT, url);
+    else if (url.startsWith('/shop/') && shopDir !== path.join(ROOT, 'web', 'shop')) file = path.join(shopDir, url.slice('/shop/'.length));
     else file = path.join(ROOT, 'web', url);
-    if (!path.resolve(file).startsWith(ROOT) || file.includes('..')) { res.writeHead(403); return res.end(); }
+    if ((!path.resolve(file).startsWith(ROOT) && !path.resolve(file).startsWith(path.resolve(shopDir))) || file.includes('..')) { res.writeHead(403); return res.end(); }
     fs.readFile(file, (err, data) => {
       if (err) { res.writeHead(404); return res.end('Not found'); }
       // CORS: the Android app loads pages from file:// and reads the shop catalog and images from this server.

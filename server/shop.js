@@ -125,9 +125,33 @@ function createShop(dir) {
     return it;
   }
 
+  // Rebuild the shop from a remote copy (used when this computer's shop folder is empty).
+  // `images` maps "art/<file>" to its bytes. Only well-formed items with a real image are kept.
+  function importAll(list, images) {
+    let n = 0;
+    (list || []).forEach((it) => {
+      try {
+        if (!it || !/^[a-z0-9-]{1,48}$/.test(String(it.id)) || items.some((x) => x.id === it.id)) return;
+        const rel = String(it.image || '');
+        const buf = images[rel];
+        if (!/^art\/[a-z0-9._-]+$/.test(rel) || !buf || !buf.length || buf.length > MAX_IMAGE_BYTES || !sniffImage(buf)) return;
+        const fields = cleanFields(it, false);
+        fs.writeFileSync(path.join(dir, rel), buf);
+        items.push(Object.assign({ id: it.id }, fields, { image: rel, added: Number(it.added) || Date.now() }));
+        n++;
+      } catch (e) { /* skip a bad item */ }
+    });
+    if (n) save();
+    return n;
+  }
+  function readImage(rel) {
+    if (typeof rel !== 'string' || !/^art\/[a-z0-9._-]+$/.test(rel)) return null;
+    try { return fs.readFileSync(path.join(dir, rel)); } catch (e) { return null; }
+  }
+
   load();
   if (!fs.existsSync(jsonFile) || !fs.existsSync(jsFile)) save();
-  return { PIECES, list: () => items.slice(), addItem, updateItem, deleteItem, reload: load, ShopError };
+  return { PIECES, list: () => items.slice(), addItem, updateItem, deleteItem, importAll, readImage, reload: load, ShopError };
 }
 
 module.exports = { createShop, PIECES, ShopError };
