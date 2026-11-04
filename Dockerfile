@@ -14,5 +14,5 @@ ENV NODE_ENV=production \
 VOLUME /data
 EXPOSE 3000
 HEALTHCHECK --interval=30s --timeout=5s CMD wget -qO- http://127.0.0.1:3000/healthz || exit 1
-USER node
+# Runs as root on purpose: hosts mount the /data volume owned by root, and a non-root user could not write to it.
 CMD ["node", "server/server.js"]

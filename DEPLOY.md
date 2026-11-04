@@ -61,3 +61,10 @@ Skins you add in the admin page are saved on the computer running the server. To
 - If you move to a new computer or wipe the shop folder, start the server with the same settings and it restores your skins from GitHub automatically. (If only some could be downloaded it stops and tells you, rather than overwrite the copy on GitHub.)
 - The token only ever lives in the server's settings. It is never sent to players or written into any file.
 - Skins are public: anyone with the repository address can view the images. Prices and ownership are still decided inside the game on each device.
+
+## If the deploy fails ("Exited with status 1")
+Open the host's **Logs** and read the lines just above the failure; the last error line names the cause. Common ones:
+- `EACCES ... mkdir '/data/...'`: the server could not write to its data folder. Fixed in this version (the image runs as root and the server falls back to a temporary folder with a warning). Redeploy the latest code.
+- `Cannot find module 'ws'`: dependencies did not install. Check that `package.json` is in the repo root and the build log shows `npm install` finishing.
+- `EADDRINUSE`: another program is using the port. Locally, stop the other copy; on a host, do not set `PORT` yourself.
+If it still fails, copy those last log lines and send them over.
