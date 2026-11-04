@@ -31,6 +31,8 @@
   };
 
   const clone = (o) => JSON.parse(JSON.stringify(o));
+  // Any piece currently of type Monarch counts, including a Joker that has become one.
+  const isMonarch = (p) => p.type === 'monarch';
   const beats = (a, b) => BEATS[a].indexOf(b) !== -1;
 
   function newHand(seat) {
@@ -49,8 +51,8 @@
 
   function lossReason(s, seat, royalLost) {
     const mine = s.hands[seat];
-    // Losing one Monarch is not fatal if another true Monarch remains in hand.
-    if (royalLost[seat] && !mine.some((p) => p.royal)) return 'monarch';
+    // Losing one Monarch is not fatal while any other Monarch (including a transformed Joker) remains.
+    if (royalLost[seat] && !mine.some(isMonarch)) return 'monarch';
     if (!mine.length) return 'no_pieces';
     return null;
   }
@@ -70,8 +72,9 @@
 
     const remove = (seat, p) => { s.hands[seat] = s.hands[seat].filter((x) => x !== p); };
     const destroy = (seat, p) => {
-      if (p.royal) royalLost[seat] = true;
-      log.destroyed.push({ seat: seat, type: p.type, royal: !!p.royal, wasJoker: !!p.wasJoker });
+      const mon = isMonarch(p);
+      if (mon) royalLost[seat] = true;
+      log.destroyed.push({ seat: seat, type: p.type, royal: mon, wasJoker: !!p.wasJoker });
       remove(seat, p);
       progress = true;
     };
@@ -102,10 +105,10 @@
     s.idle = progress ? 0 : s.idle + 1;
     s.history.push(log);
 
-    // Losing the final true Monarch is decisive, unless both players lose their final
+    // Losing the final Monarch (of any origin) is decisive, unless both players lose their final
     // Monarch in the same round. Losing one of multiple Monarchs is not game-ending.
     const finalRoyalLost = [0, 1].map((seat) =>
-      royalLost[seat] && !s.hands[seat].some((p) => p.royal)
+      royalLost[seat] && !s.hands[seat].some(isMonarch)
     );
     let l0, l1;
     if (finalRoyalLost[0] !== finalRoyalLost[1]) {
@@ -168,17 +171,16 @@
 
   // What anyone can know about a player's hand: the starting set, minus every piece publicly destroyed or
   // spent, with Jokers that transformed counted as the piece they became. Returns { counts, royal } where
-  // royal is 1 while that player still holds their true Monarch (a transformed Joker is never royal).
+  // royal is 1 while that player holds at least one Monarch (a Joker that became a Monarch counts).
   function trackHand(history, seat) {
     const counts = {};
     ORDER.forEach((t) => { counts[t] = PIECES[t].count; });
-    let royal = 1;
     history.forEach((log) => {
       if (log.became && log.became.seat === seat) { if (counts.joker > 0) counts.joker--; counts[log.became.type]++; }
-      log.destroyed.forEach((d) => { if (d.seat === seat) { if (counts[d.type] > 0) counts[d.type]--; if (d.royal) royal = 0; } });
+      log.destroyed.forEach((d) => { if (d.seat === seat) { if (counts[d.type] > 0) counts[d.type]--; } });
       log.spent.forEach((sp) => { if (sp.seat === seat && counts[sp.type] > 0) counts[sp.type]--; });
     });
-    return { counts: counts, royal: royal };
+    return { counts: counts, royal: counts.monarch > 0 ? 1 : 0 };
   }
   function estimateOpponent(history, oppSeat) { return trackHand(history, oppSeat).counts; }
 
@@ -279,26 +281,32 @@
     return v;
   }
   const cloneHand = (h) => ({ counts: Object.assign({}, h.counts), royal: h.royal });
+  const refresh = (h) => { h.royal = h.counts.monarch > 0 ? 1 : 0; return h; };
 
   // Payoff, for the player holding `me`, of playing type p against type q (positive is good for me).
   function roundPayoff(me, opp, p, q) {
     const m = cloneHand(me), o = cloneHand(opp);
     const before = material(me, opp.royal) - material(opp, me.royal);
+    // A side is on its last Monarch when exactly one remains: losing it ends the game for that side.
+    const meLast = me.counts.monarch <= 1, oppLast = opp.counts.monarch <= 1;
     if (p === 'joker' && q === 'joker') return 0;
     if (p === 'joker') { m.counts.joker--; m.counts[q]++; }
     else if (q === 'joker') { o.counts.joker--; o.counts[p]++; }
     else if (p === q) {
       m.counts[p]--; o.counts[q]--;
-      if (p === 'monarch' && me.royal && opp.royal) return 0;            // both Monarchs fall: a draw
-      if (p === 'monarch' && me.royal) return -GAME;
-      if (p === 'monarch' && opp.royal) return GAME;
+      if (p === 'monarch') {
+        if (meLast && oppLast) return 0;                                  // both last Monarchs fall: a draw
+        if (meLast) return -GAME;
+        if (oppLast) return GAME;
+      }
     } else if (beats(p, q)) {
-      if (q === 'monarch' && opp.royal) return GAME;                      // the Monarch is taken
+      if (q === 'monarch' && oppLast) return GAME;                        // the last Monarch is taken
       o.counts[q]--; if (p === 'dragon') m.counts.dragon--;
     } else {
-      if (p === 'monarch' && me.royal) return -GAME;
+      if (p === 'monarch' && meLast) return -GAME;
       m.counts[p]--; if (q === 'dragon') o.counts.dragon--;
     }
+    refresh(m); refresh(o);
     return (material(m, o.royal) - material(o, m.royal)) - before;
   }
 
@@ -338,9 +346,10 @@
     if (lv.explore && rng() < lv.explore) return mine[Math.floor(rng() * mine.length)].id;
 
     // What is publicly known: my own hand exactly, the opponent's hand from what has been revealed.
-    const me = { counts: {}, royal: mine.some((x) => x.royal) ? 1 : 0 };
+    const me = { counts: {}, royal: 0 };
     ORDER.forEach((t) => { me.counts[t] = 0; });
     mine.forEach((x) => { me.counts[x.type]++; });
+    me.royal = me.counts.monarch > 0 ? 1 : 0;
     let opp = trackHand(state.history, 1 - seat);
     if (!ORDER.some((t) => opp.counts[t] > 0)) opp = { counts: Object.assign({}, opp.counts, { joker: 1 }), royal: 0 };
 
@@ -362,9 +371,8 @@
 
     let r = rng(), type = rows[rows.length - 1];
     for (let i = 0; i < rows.length; i++) { r -= dist[i]; if (r <= 0) { type = rows[i]; break; } }
-    // Prefer the true Monarch when playing the Monarch type, otherwise any piece of that type.
-    const same = mine.filter((x) => x.type === type);
-    return (same.filter((x) => x.royal)[0] || same[0]).id;
+    // Any piece of the chosen type will do; every Monarch is equal.
+    return mine.filter((x) => x.type === type)[0].id;
   }
 
   return { PIECES, ORDER, BEATS, beats, createGame, play, describeRound, endText, viewFor, botPick, predictOpponent, estimateOpponent, trackHand, BOT_LEVELS };

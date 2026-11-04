@@ -60,7 +60,7 @@ The game ends only when a Monarch is eliminated: capture the opponent's last Mon
 
 ### Rulings I had to choose
 - A winning piece returns to hand and can be used again; the loser is destroyed. Only the Dragon is spent after winning. Equal pieces destroy each other (except Jokers).
-- A player loses only when their last true Monarch is captured. Losing one of multiple Monarchs does not end the game. If both players lose their last Monarch in the same round, the game is a draw.
+- A player loses only when their last Monarch (any Monarch piece, including a Joker that became one) is captured. Losing one of multiple Monarchs does not end the game. If both players lose their last Monarch in the same round, the game is a draw.
 
 ## Layout
 - `shared/engine.js` rules engine (used by server, browser and app), `shared/engine.test.js`

@@ -75,12 +75,34 @@ t('joker vs joker: both stay', () => {
   assert.ok(!s.over);
 });
 
-t('transformed joker is not a monarch for loss purposes', () => {
+t('a Joker that became a Monarch is a Monarch', () => {
   let s = state(['joker', 'knight', 'fool'], ['monarch', 'knight', 'fool']);
   s = E.play(s, id(0, 'joker'), id(1, 'monarch'));
   const j = s.hands[0].find((p) => p.wasJoker);
   assert.strictEqual(j.type, 'monarch');
-  assert.ok(!j.royal);
+  assert.strictEqual(E.trackHand(s.history, 0).royal, 1);
+});
+
+t('a Joker-Monarch keeps its owner alive when the original Monarch falls, and losing it is fatal', () => {
+  // seat 0 holds the original Monarch plus a Joker that has become a Monarch
+  let s = state(['monarch', 'joker', 'fool'], ['monarch', 'empress', 'fool']);
+  s = E.play(s, id(0, 'joker'), id(1, 'monarch'));            // Joker becomes a Monarch
+  assert.strictEqual(count(s, 0, 'monarch'), 2);
+  s = E.play(s, id(0, 'monarch', 0), id(1, 'empress'));       // original Monarch captured
+  assert.ok(!s.over, 'the transformed Joker is still a Monarch');
+  assert.strictEqual(count(s, 0, 'monarch'), 1);
+  s = E.play(s, id(0, 'joker'), id(1, 'empress'));            // last Monarch (ex-Joker) captured
+  assert.ok(s.over && s.winner === 1 && s.end.code === 'monarch' && s.end.loser === 0);
+});
+
+t('the transformed Joker-Monarch being destroyed first does not end the game while the original lives', () => {
+  let s = state(['monarch', 'joker', 'fool'], ['monarch', 'empress', 'fool']);
+  s = E.play(s, id(0, 'joker'), id(1, 'monarch'));
+  s = E.play(s, id(0, 'joker'), id(1, 'empress'));            // ex-Joker captured
+  assert.ok(!s.over);
+  assert.strictEqual(count(s, 0, 'monarch'), 1);
+  s = E.play(s, id(0, 'monarch', 0), id(1, 'empress'));
+  assert.ok(s.over && s.winner === 1 && s.end.code === 'monarch');
 });
 
 t('win by monarch capture', () => {
