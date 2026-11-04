@@ -24,3 +24,6 @@ every player's Shop straight away (they just reopen the Shop).
 ## Image tips
 - Portrait 3:4 (for example 540x720) looks best; other shapes are cropped to fit the card.
 - Keep files under about 300 KB so the app stays small and loads fast.
+
+## Always-on copy
+Set up the GitHub copy (see `DEPLOY.md`, "Always-on shop") and put its address in `web/config.js` as `shopUrl`. Then the game loads this shop list and the images from GitHub every time it opens, not from your computer.

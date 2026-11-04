@@ -9,4 +9,4 @@
  * appear even when your computer is off. It is the "raw" address of the GitHub folder the admin page uploads to, ending in "/",
  * for example:  shopUrl: 'https://raw.githubusercontent.com/YourName/ryuhai-skins/main/'
  * The admin page shows the exact address to paste here once the remote is set up. Leave empty to use only the game server. */
-window.HC_CONFIG = { server: '', shopUrl: 'https://raw.githubusercontent.com/Bixie5/Ryuhai-skins/main/' };
+window.HC_CONFIG = { server: '', shopUrl: '' };
