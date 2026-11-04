@@ -1,0 +1,15 @@
+# One-click setup on Render (https://render.com): New > Blueprint > pick this repo.
+services:
+  - type: web
+    name: ryuhai
+    runtime: docker
+    plan: free            # free works for trying it out; see DEPLOY.md about saves on free plans
+    healthCheckPath: /healthz
+    envVars:
+      - key: ADMIN_KEY
+        generateValue: true   # shown in the Render dashboard; the shop admin page needs it
+    # For permanent accounts and skins, switch to a paid plan and add a disk:
+    # disk:
+    #   name: ryuhai-data
+    #   mountPath: /data
+    #   sizeGB: 1
