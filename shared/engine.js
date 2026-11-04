@@ -166,46 +166,206 @@
     };
   }
 
-  // What a player can know about the opponent's pieces: the starting set minus everything
-  // publicly destroyed or spent. Jokers that already transformed are tracked as jokers.
-  function estimateOpponent(history, oppSeat) {
-    const c = {};
-    ORDER.forEach((t) => { c[t] = PIECES[t].count; });
+  // What anyone can know about a player's hand: the starting set, minus every piece publicly destroyed or
+  // spent, with Jokers that transformed counted as the piece they became. Returns { counts, royal } where
+  // royal is 1 while that player still holds their true Monarch (a transformed Joker is never royal).
+  function trackHand(history, seat) {
+    const counts = {};
+    ORDER.forEach((t) => { counts[t] = PIECES[t].count; });
+    let royal = 1;
     history.forEach((log) => {
-      log.destroyed.forEach((d) => { if (d.seat === oppSeat) { const t = d.wasJoker ? 'joker' : d.type; if (c[t] > 0) c[t]--; } });
-      log.spent.forEach((sp) => { if (sp.seat === oppSeat && c[sp.type] > 0) c[sp.type]--; });
+      if (log.became && log.became.seat === seat) { if (counts.joker > 0) counts.joker--; counts[log.became.type]++; }
+      log.destroyed.forEach((d) => { if (d.seat === seat) { if (counts[d.type] > 0) counts[d.type]--; if (d.royal) royal = 0; } });
+      log.spent.forEach((sp) => { if (sp.seat === seat && counts[sp.type] > 0) counts[sp.type]--; });
     });
-    return c;
+    return { counts: counts, royal: royal };
+  }
+  function estimateOpponent(history, oppSeat) { return trackHand(history, oppSeat).counts; }
+
+  // ---------------------------------------------------------------------------------------------
+  // Bot. It only ever uses PUBLIC information: its own hand, the pieces it has seen destroyed or
+  // spent, and what the opponent revealed in earlier rounds. It never reads the opponent's hand or
+  // their locked-in pick.
+  //
+  // 1. estimateOpponent: which piece types the opponent can still have.
+  // 2. predictOpponent:  how likely each of those is to be played next, learned from their habits:
+  //      - how often they play each piece (recent rounds count more),
+  //      - what they tend to play after the piece they just played,
+  //      - whether they stay with a piece after winning / switch after losing.
+  // 3. botPick:          scores each of its own pieces against that prediction and picks, with a
+  //                      little randomness so it cannot be read perfectly.
+  //
+  // Levels: easy (no habit learning, often random), normal (learns slowly), hard (learns fast,
+  // picks the best option almost every time but avoids being predictable itself).
+  // ---------------------------------------------------------------------------------------------
+  const BOT_LEVELS = {
+    // learn: how strongly habits are used (prior = pseudo-rounds of "no idea" before the data counts)
+    // temp: how close to the best-looking piece it sticks (lower = sharper); mix: share of the unexploitable
+    // equilibrium strategy (hard only); explore: share of purely random picks
+    easy:   { learn: 0, prior: 1,   temp: 1.8, mix: 0,   explore: 0.3, exploit: 0 },
+    normal: { learn: 1, prior: 4,   temp: 0.7, mix: 0,   explore: 0,   exploit: 1 },
+    hard:   { learn: 1, prior: 1.2, temp: 0.3, mix: 1,   explore: 0,   exploit: 0.45 }
+  };
+  const DECAY = 0.88; // a round one step older counts 12% less
+
+  function resultFor(log, seat) {
+    if (log.outcome === 'win' + seat) return 'won';
+    if (log.outcome === 'win' + (1 - seat)) return 'lost';
+    return 'other';
   }
 
-  // Simple bot: uses only public information, then picks with noise.
-  function botPick(state, seat, rng) {
+  // Probability that the opponent plays each type next. Returns { type: p } over types they may still hold.
+  function predictOpponent(history, oppSeat, est, level) {
+    const lv = BOT_LEVELS[level] || BOT_LEVELS.normal;
+    const avail = ORDER.filter((t) => est[t] > 0);
+    const out = {};
+    if (!avail.length) return out;
+    // Before anything is known, assume the Monarch is played less often than other pieces: it is the piece that loses the game.
+    const pw = {}; let pt = 0;
+    avail.forEach((t) => { pw[t] = t === 'monarch' ? 0.35 : 1; pt += pw[t]; });
+    avail.forEach((t) => { out[t] = pw[t] / pt; });
+    if (!lv.learn || !history.length) return out;
+
+    const n = history.length;
+    const plays = history.map((l) => l.types[oppSeat]);
+    const age = (i) => Math.pow(DECAY, n - 1 - i);           // newest round has weight 1
+
+    // (a) how often each piece has been played
+    const freq = {}; let ft = 0;
+    avail.forEach((t) => { freq[t] = 0; });
+    plays.forEach((t, i) => { if (freq[t] !== undefined) { freq[t] += age(i); ft += age(i); } });
+    let dist = {};
+    avail.forEach((t) => { dist[t] = (lv.prior * out[t] + freq[t]) / (lv.prior + ft); });
+
+    // (b) what they play after the piece they played last
+    const last = plays[n - 1];
+    const trans = {}; let tt = 0;
+    avail.forEach((t) => { trans[t] = 0; });
+    for (let i = 1; i < n; i++) {
+      if (plays[i - 1] === last && trans[plays[i]] !== undefined) { trans[plays[i]] += age(i); tt += age(i); }
+    }
+    if (tt > 0) {
+      const lam = tt / (tt + 2.5);
+      avail.forEach((t) => { dist[t] = (1 - lam) * dist[t] + lam * (trans[t] / tt); });
+    }
+
+    // (c) do they stay with the same piece after this kind of result?
+    const res = resultFor(history[n - 1], oppSeat);
+    let stay = 0, tot = 0;
+    for (let i = 1; i < n; i++) {
+      if (resultFor(history[i - 1], oppSeat) === res) { tot += age(i); if (plays[i] === plays[i - 1]) stay += age(i); }
+    }
+    if (tot > 0 && dist[last] !== undefined && dist[last] < 1) {
+      const base = dist[last];
+      const sRate = (stay + 1.5 * base) / (tot + 1.5);
+      const rest = 1 - base;
+      avail.forEach((t) => { dist[t] = t === last ? sRate : (rest > 0 ? (1 - sRate) * dist[t] / rest : 0); });
+    }
+
+    let sum = 0; avail.forEach((t) => { sum += dist[t]; });
+    avail.forEach((t) => { out[t] = dist[t] / sum; });
+    return out;
+  }
+
+  // ---- scoring a possible round ----
+  // How much each piece is worth to hold. The Monarch is scored separately (losing it loses the game).
+  const HOLD = { dragon: 4, monarch: 2, knight: 3.2, wizard: 2.6, knave: 2, fool: 1, empress: 2.2, joker: 4 };
+  const GAME = 40;   // value of winning (or losing) the game outright
+
+  const KILL = 7;    // holding a Monarch-killer (Dragon or Empress) while the other side still has its Monarch
+  function material(h, enemyRoyal) {
+    let v = 0; ORDER.forEach((t) => { v += HOLD[t] * h.counts[t]; });
+    if (enemyRoyal && (h.counts.dragon > 0 || h.counts.empress > 0)) v += KILL;
+    return v;
+  }
+  const cloneHand = (h) => ({ counts: Object.assign({}, h.counts), royal: h.royal });
+
+  // Payoff, for the player holding `me`, of playing type p against type q (positive is good for me).
+  function roundPayoff(me, opp, p, q) {
+    const m = cloneHand(me), o = cloneHand(opp);
+    const before = material(me, opp.royal) - material(opp, me.royal);
+    if (p === 'joker' && q === 'joker') return 0;
+    if (p === 'joker') { m.counts.joker--; m.counts[q]++; }
+    else if (q === 'joker') { o.counts.joker--; o.counts[p]++; }
+    else if (p === q) {
+      m.counts[p]--; o.counts[q]--;
+      if (p === 'monarch' && me.royal && opp.royal) return 0;            // both Monarchs fall: a draw
+      if (p === 'monarch' && me.royal) return -GAME;
+      if (p === 'monarch' && opp.royal) return GAME;
+    } else if (beats(p, q)) {
+      if (q === 'monarch' && opp.royal) return GAME;                      // the Monarch is taken
+      o.counts[q]--; if (p === 'dragon') m.counts.dragon--;
+    } else {
+      if (p === 'monarch' && me.royal) return -GAME;
+      m.counts[p]--; if (q === 'dragon') o.counts.dragon--;
+    }
+    return (material(m, o.royal) - material(o, m.royal)) - before;
+  }
+
+  function payoffMatrix(me, opp, rows, cols) { return rows.map((p) => cols.map((q) => roundPayoff(me, opp, p, q))); }
+
+  // Unexploitable mix for a zero-sum matrix game (regret matching; the averaged strategy approaches the equilibrium).
+  function solveMix(A, iters) {
+    const m = A.length, n = A[0].length;
+    const rr = new Array(m).fill(0), cr = new Array(n).fill(0), rs = new Array(m).fill(0);
+    const pos = (r) => { let t = 0; const w = r.map((x) => { const v = x > 0 ? x : 0; t += v; return v; }); return t > 0 ? w.map((x) => x / t) : r.map(() => 1 / r.length); };
+    for (let it = 0; it < iters; it++) {
+      const x = pos(rr), y = pos(cr);
+      for (let i = 0; i < m; i++) rs[i] += x[i];
+      const rv = A.map((row) => row.reduce((acc, a, j) => acc + a * y[j], 0));
+      let ev = 0; for (let i = 0; i < m; i++) ev += x[i] * rv[i];
+      for (let i = 0; i < m; i++) rr[i] += rv[i] - ev;
+      const cv = new Array(n).fill(0);
+      for (let j = 0; j < n; j++) { for (let i = 0; i < m; i++) cv[j] -= A[i][j] * x[i]; }
+      let cev = 0; for (let j = 0; j < n; j++) cev += y[j] * cv[j];
+      for (let j = 0; j < n; j++) cr[j] += cv[j] - cev;
+    }
+    const tot = rs.reduce((a, b) => a + b, 0) || 1;
+    return rs.map((x) => x / tot);
+  }
+
+  function softmax(scores, temp) {
+    const top = Math.max.apply(null, scores);
+    const w = scores.map((s) => Math.exp((s - top) / temp));
+    const t = w.reduce((a, b) => a + b, 0);
+    return w.map((x) => x / t);
+  }
+
+  function botPick(state, seat, rng, level) {
     rng = rng || Math.random;
+    const lv = BOT_LEVELS[level] || BOT_LEVELS.normal;
     const mine = state.hands[seat];
-    const est = estimateOpponent(state.history, 1 - seat);
-    const theirs = [];
-    ORDER.forEach((t) => { for (let i = 0; i < est[t]; i++) theirs.push({ type: t, royal: t === 'monarch' }); });
-    if (!theirs.length) theirs.push({ type: 'joker', royal: false });
-    const value = (p, q) => {
-      if (p.type === 'joker') return q.type === 'joker' ? 0 : 0.3 + (q.type === 'dragon' ? 0.6 : q.type === 'monarch' ? 0.3 : 0);
-      if (q.type === 'joker') return 0;
-      if (p.type === q.type) return p.royal ? -3 : -0.3;
-      if (beats(p.type, q.type)) return 1 + (q.royal ? 3 : 0);
-      return p.royal ? -3 : -1;
-    };
-    const scores = mine.map((p) => {
-      let s = 0;
-      theirs.forEach((q) => { s += value(p, q); });
-      s = s / theirs.length;
-      if (PIECES[p.type].singleUse) s -= 0.1;
-      return s;
-    });
-    const weights = scores.map((s) => Math.exp(s / 0.6));
-    const total = weights.reduce((x, y) => x + y, 0);
-    let r = rng() * total;
-    for (let i = 0; i < mine.length; i++) { r -= weights[i]; if (r <= 0) return mine[i].id; }
-    return mine[mine.length - 1].id;
+    if (lv.explore && rng() < lv.explore) return mine[Math.floor(rng() * mine.length)].id;
+
+    // What is publicly known: my own hand exactly, the opponent's hand from what has been revealed.
+    const me = { counts: {}, royal: mine.some((x) => x.royal) ? 1 : 0 };
+    ORDER.forEach((t) => { me.counts[t] = 0; });
+    mine.forEach((x) => { me.counts[x.type]++; });
+    let opp = trackHand(state.history, 1 - seat);
+    if (!ORDER.some((t) => opp.counts[t] > 0)) opp = { counts: Object.assign({}, opp.counts, { joker: 1 }), royal: 0 };
+
+    const rows = ORDER.filter((t) => me.counts[t] > 0);
+    const cols = ORDER.filter((t) => opp.counts[t] > 0);
+    const A = payoffMatrix(me, opp, rows, cols);
+
+    // Best reply to what this opponent's habits suggest (easy: assumes they pick anything with equal chance).
+    const prob = predictOpponent(state.history, 1 - seat, opp.counts, level);
+    const expect = A.map((row) => row.reduce((acc, a, j) => acc + a * (prob[cols[j]] || 0), 0));
+    const reply = softmax(expect.map((v, i) => v - (PIECES[rows[i]].singleUse ? 0.1 : 0)), lv.temp);
+
+    let dist;
+    if (lv.mix) {
+      const safe = solveMix(A, 500);
+      const k = lv.exploit * Math.min(1, state.history.length / 10);   // trust the habit reading more as rounds pass
+      dist = safe.map((x, i) => (1 - k) * x + k * reply[i]);
+    } else dist = reply;
+
+    let r = rng(), type = rows[rows.length - 1];
+    for (let i = 0; i < rows.length; i++) { r -= dist[i]; if (r <= 0) { type = rows[i]; break; } }
+    // Prefer the true Monarch when playing the Monarch type, otherwise any piece of that type.
+    const same = mine.filter((x) => x.type === type);
+    return (same.filter((x) => x.royal)[0] || same[0]).id;
   }
 
-  return { PIECES, ORDER, BEATS, beats, createGame, play, describeRound, endText, viewFor, botPick, estimateOpponent };
+  return { PIECES, ORDER, BEATS, beats, createGame, play, describeRound, endText, viewFor, botPick, predictOpponent, estimateOpponent, trackHand, BOT_LEVELS };
 });
