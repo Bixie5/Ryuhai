@@ -140,7 +140,7 @@
       case 'joker1': t = B + "'s Joker becomes a " + na + '! Both pieces return to hand.'; break;
       default: t = 'Joker meets Joker. Both return to hand.';
     }
-    if (log.destroyed.some((d) => d.royal)) t += ' The Monarch has fallen!';
+    if (log.destroyed.some((d) => d.royal)) t += ' A Monarch has fallen!';
     return t;
   }
 
@@ -206,7 +206,8 @@
     // equilibrium strategy (hard only); explore: share of purely random picks
     easy:   { learn: 0, prior: 1,   temp: 1.8, mix: 0,   explore: 0.3, exploit: 0 },
     normal: { learn: 1, prior: 4,   temp: 0.7, mix: 0,   explore: 0,   exploit: 1 },
-    hard:   { learn: 1, prior: 1.2, temp: 0.3, mix: 1,   explore: 0,   exploit: 0.45 }
+    random: { pure: 1, learn: 0, prior: 1, temp: 1, mix: 0, explore: 0, exploit: 0 },
+    hard:   { learn: 1, prior: 1.2, temp: 0.6, mix: 1,   explore: 0,   exploit: 0.35, qtemp: 1.2 }
   };
   const DECAY = 0.88; // a round one step older counts 12% less
 
@@ -332,6 +333,21 @@
     return rs.map((x) => x / tot);
   }
 
+  // Quantal-response equilibrium: both sides pick better pieces more often but never exclusively, so every
+  // sensible piece keeps real probability (an exact equilibrium of this heuristic table is nearly one piece).
+  function solveQuantal(A, temp, iters) {
+    const m = A.length, n = A[0].length;
+    let x = new Array(m).fill(1 / m), y = new Array(n).fill(1 / n);
+    for (let it = 0; it < iters; it++) {
+      const ev = A.map((row) => row.reduce((a, v, j) => a + v * y[j], 0));
+      const cv = new Array(n).fill(0);
+      for (let j = 0; j < n; j++) for (let i = 0; i < m; i++) cv[j] -= A[i][j] * x[i];
+      const nx = softmax(ev, temp), ny = softmax(cv, temp);
+      x = x.map((v, i) => 0.7 * v + 0.3 * nx[i]); y = y.map((v, j) => 0.7 * v + 0.3 * ny[j]);
+    }
+    return x;
+  }
+
   function softmax(scores, temp) {
     const top = Math.max.apply(null, scores);
     const w = scores.map((s) => Math.exp((s - top) / temp));
@@ -343,6 +359,18 @@
     rng = rng || Math.random;
     const lv = BOT_LEVELS[level] || BOT_LEVELS.normal;
     const mine = state.hands[seat];
+    if (lv.pure) {
+      // Purely random, except it never plays a piece that is certain to lose against everything the opponent
+      // can still have (their hand is worked out from what has been revealed, including Jokers that transformed).
+      const opp = trackHand(state.history, 1 - seat);
+      const left = ORDER.filter((t) => opp.counts[t] > 0);
+      const types = ORDER.filter((t) => mine.some((x) => x.type === t));
+      let ok = left.length ? types.filter((t) => t === 'joker' || !left.every((q) => beats(q, t))) : types;
+      if (!ok.length) ok = types;
+      const pick = ok[Math.floor(rng() * ok.length)];
+      const own = mine.filter((x) => x.type === pick);
+      return own[Math.floor(rng() * own.length)].id;
+    }
     if (lv.explore && rng() < lv.explore) return mine[Math.floor(rng() * mine.length)].id;
 
     // What is publicly known: my own hand exactly, the opponent's hand from what has been revealed.
@@ -364,10 +392,14 @@
 
     let dist;
     if (lv.mix) {
-      const safe = solveMix(A, 500);
+      const safe = solveQuantal(A, lv.qtemp || 1.2, 200);
       const k = lv.exploit * Math.min(1, state.history.length / 10);   // trust the habit reading more as rounds pass
       dist = safe.map((x, i) => (1 - k) * x + k * reply[i]);
     } else dist = reply;
+    if (lv.mix && rows.length > 1 && state.history.length) {   // don't fall into a rhythm: lean away from the piece just played
+      const li = rows.indexOf(state.history[state.history.length - 1].types[seat]);
+      if (li >= 0) { dist = dist.slice(); dist[li] *= 0.6; const t = dist.reduce((a, b) => a + b, 0); dist = dist.map((v) => v / t); }
+    }
 
     let r = rng(), type = rows[rows.length - 1];
     for (let i = 0; i < rows.length; i++) { r -= dist[i]; if (r <= 0) { type = rows[i]; break; } }

@@ -20,7 +20,16 @@ function createServer(opts) {
   const ROOM_TTL = 1000 * 60 * 60 * 3;
 
   // DATA_DIR puts everything that changes while the server runs (accounts, shop skins) in one folder, so one disk/volume keeps it all.
-  const dataDir = process.env.DATA_DIR || '';
+  // If that folder cannot be written (a host that did not mount a disk), keep running with a temporary folder instead of crashing.
+  let dataDir = process.env.DATA_DIR || '';
+  if (dataDir) {
+    try { fs.mkdirSync(dataDir, { recursive: true }); fs.accessSync(dataDir, fs.constants.W_OK); }
+    catch (e) {
+      const tmp = path.join(os.tmpdir(), 'ryuhai-data');
+      console.error('WARNING: cannot write to DATA_DIR (' + dataDir + '): ' + e.message + '\n         Using ' + tmp + ' instead. Accounts and skins will be lost on restart. Attach a persistent disk to keep them.');
+      dataDir = tmp;
+    }
+  }
   const shopDir = opts.shopDir || (dataDir ? path.join(dataDir, 'shop') : path.join(ROOT, 'web', 'shop'));
   const shop = createShop(shopDir);
   // Optional free always-on copy of the shop on GitHub (see server/remote.js). Off unless configured.

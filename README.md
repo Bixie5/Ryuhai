@@ -22,7 +22,7 @@ Each round ends on its result. Online, both players press **Next turn** on their
 
 **PvP points:** a separate score shown top-left on the home screen with a W/L/D record. Only online games against another person count (not the Bot, not Pass & play): win +10, draw +5, loss -10. A win where your Empress made the final capture (took the Monarch) is worth +20. Points and the record are saved on the device.
 
-**Bananas:** finished games pay out bananas, shown in the top-right corner. Online games: win +100, draw +50, loss -50. Against the Bot it depends on the level: Easy pays nothing (win, draw or loss), Normal win +50, draw 0, loss -50, Hard win +100, draw 0, loss -50. The balance is saved on the device (browser or Android app), starts at 0 and can go below zero. Games against the Bot and online games pay out; Pass & play does not.
+**Bananas:** finished games pay out bananas, shown in the top-right corner. Online games: win +100, draw +50, loss -50. Against the Bot it depends on the level: Random and Easy pay nothing (win, draw or loss), Normal win +50, draw 0, loss -50, Hard win +100, draw 0, loss -50. The balance is saved on the device (browser or Android app), starts at 0 and can go below zero. Games against the Bot and online games pay out; Pass & play does not.
 
 Also on the menu: **Play vs Bot** and **Pass & play** (one device, works offline).
 
@@ -97,8 +97,9 @@ Players on different networks need to reach the same server. See **DEPLOY.md**: 
 ## The Bot (three levels)
 Tapping **Play vs Bot** lets you choose a level (it remembers your last choice). The bot only ever uses what you could also see: its own hand, which of your pieces have been destroyed or spent, and what you revealed in earlier rounds. It never reads your hand or your locked-in pick.
 
+- **Random:** picks uniformly at random among the pieces it still has. It tracks what you have used and lost (from the public history only) so it never plays a piece that is certain to lose against everything you can still have. No bananas.
 - **Easy:** plays loosely, often at random, and does not learn your habits.
 - **Normal:** picks the sensible piece for what you are likely to hold and slowly learns your habits.
-- **Hard:** learns your habits quickly (how often you play each piece, what you play after a given piece, whether you stick with a winning piece or switch after a loss) and plays a mix of moves that cannot be exploited, shifted toward the best reply to your habits. It keeps a Dragon or Empress in reserve for the end, because once you run low on other pieces you are forced to risk your Monarch.
+- **Hard:** learns your habits quickly (how often you play each piece, what you play after a given piece, whether you stick with a winning piece or switch after a loss) and varies its play on purpose: it picks pieces with probabilities weighted by how good they look (a smoothed, hard-to-read mix, never one piece every time), avoids repeating its last piece, and shifts toward the best reply to your habits as the game goes on. It keeps a Dragon or Empress in reserve for the end, because once you run low on other pieces you are forced to risk your Monarch.
 
-In 240-game test matches (levels playing each other, swapping seats), Hard beat Normal in about 3 of every 4 decided games, and Normal beat Easy more often than not. Bananas depend on the level (see Bananas above). The code is `botPick` in `shared/engine.js`.
+In 240-game test matches (levels playing each other, swapping seats), Hard beat Normal in about 3 of every 5 decided games, and Normal beat Easy more often than not. Bananas depend on the level (see Bananas above). The code is `botPick` in `shared/engine.js`.

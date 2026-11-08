@@ -19,6 +19,7 @@
   var BANANA_SVG = '<svg viewBox="0 0 32 32" aria-hidden="true"><path d="M7 5.5C5.4 6.6 5.8 8.6 6.3 10.8 8 20.5 15 28 26 27.2c1.7-.2 2.4-1.8 1-2.7C19 23.4 13.8 18 12.4 10 12 7.4 9.3 3.9 7 5.5z" fill="#ffd93b" stroke="#5e3f00" stroke-width="1.6" stroke-linejoin="round"/><path d="M6.6 5.6 5.2 3.4" stroke="#5e3f00" stroke-width="2.6" stroke-linecap="round"/><path d="M9.2 9.5c1.6 7.8 6 13.2 13.3 15.6" fill="none" stroke="#fff7b0" stroke-width="1.5" stroke-linecap="round" opacity=".85"/><path d="M25.4 27.1l2.3-.4" stroke="#5e3f00" stroke-width="2.4" stroke-linecap="round"/></svg>';
   var BANANA_VALUE = { win: 100, draw: 50, loss: -50 };                       // online games
   var BOT_BANANAS = {                                                          // games against the Bot, by level
+    random: { win: 0,   draw: 0, loss: 0 },
     easy:   { win: 0,   draw: 0, loss: 0 },
     normal: { win: 50,  draw: 0, loss: -50 },
     hard:   { win: 100, draw: 0, loss: -50 }
@@ -284,7 +285,7 @@
   function startSession(s) {
     session = s; selType = null; myPick = null; lastRoundSeen = 0; lastMsg = null; arenaSig = '';
     show('home', false); show('game', true); show('endOverlay', false);
-    $('roomCode').textContent = s.kind === 'online' ? '----' : (s.kind === 'bot' ? 'Bot \u00b7 ' + ({ easy: 'Easy', normal: 'Normal', hard: 'Hard' }[s.level] || 'Normal') : 'Local');
+    $('roomCode').textContent = s.kind === 'online' ? '----' : (s.kind === 'bot' ? 'Bot \u00b7 ' + ({ random: 'Random', easy: 'Easy', normal: 'Normal', hard: 'Hard' }[s.level] || 'Normal') : 'Local');
     if (s.start) s.start();
     else render({ code: '----', names: ['You', 'Waiting...'], connected: [true, false], started: false, view: null });
   }
@@ -476,7 +477,7 @@
       var paid = awardBananas(msg.code + ':' + msg.gid, kind, table);
       if (paid === 0) {
         gain.className = 'banana-gain zero';
-        gain.innerHTML = '<span class="bi">' + BANANA_SVG + '</span><span>' + (table && session.level === 'easy' ? 'No bananas at Easy level' : 'No bananas this time') + '</span>';
+        gain.innerHTML = '<span class="bi">' + BANANA_SVG + '</span><span>' + (table && (session.level === 'easy' || session.level === 'random') ? 'No bananas at ' + (session.level === 'easy' ? 'Easy' : 'Random') + ' level' : 'No bananas this time') + '</span>';
         gain.hidden = false;
       } else if (paid != null) {
         gain.className = 'banana-gain ' + (paid > 0 ? 'plus' : 'minus');

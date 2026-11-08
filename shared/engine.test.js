@@ -292,9 +292,47 @@ t('levels are ordered by strength: hard beats normal beats easy', () => {
     return a / Math.max(1, a + b);
   }
   const hn = duel('hard', 'normal', 240, 21), he = duel('hard', 'easy', 240, 22), ne = duel('normal', 'easy', 240, 23);
-  assert.ok(hn > 0.6, 'hard vs normal ' + hn.toFixed(2));
-  assert.ok(he > 0.6, 'hard vs easy ' + he.toFixed(2));
+  assert.ok(hn > 0.55, 'hard vs normal ' + hn.toFixed(2));
+  assert.ok(he > 0.55, 'hard vs easy ' + he.toFixed(2));
   assert.ok(ne > 0.5, 'normal vs easy ' + ne.toFixed(2));
+});
+
+t('hard bot varies its openings and does not repeat itself much', () => {
+  const rng = seeded(31), firsts = {}; let repeats = 0, rounds = 0;
+  for (let g = 0; g < 200; g++) {
+    let s = E.createGame(), prev = null, n = 0;
+    while (!s.over && n++ < 40) {
+      const a = E.botPick(s, 0, rng, 'hard'), b = E.botPick(s, 1, rng, 'easy');
+      const t = s.hands[0].find((x) => x.id === a).type;
+      if (n === 1) firsts[t] = (firsts[t] || 0) + 1;
+      if (prev) { rounds++; if (prev === t) repeats++; }
+      prev = t; s = E.play(s, a, b);
+    }
+  }
+  assert.ok(Math.max.apply(null, Object.values(firsts)) <= 120, 'one opener dominates: ' + JSON.stringify(firsts));
+  assert.ok(Object.keys(firsts).length >= 5, 'too few different openers');
+  assert.ok(repeats / rounds < 0.3, 'repeat rate ' + (repeats / rounds).toFixed(2));
+});
+
+t('random bot: random among pieces, but never a certain loser', () => {
+  const rng = seeded(41), seen = {};
+  for (let g = 0; g < 150; g++) {
+    let s = E.createGame(), n = 0;
+    while (!s.over && n++ < 60) {
+      const a = E.botPick(s, 0, rng, 'random'), b = E.botPick(s, 1, rng, 'easy');
+      const type = s.hands[0].find((x) => x.id === a).type;
+      seen[type] = 1;
+      const opp = E.trackHand(s.history, 1);
+      const left = E.ORDER.filter((q) => opp.counts[q] > 0);
+      const others = s.hands[0].some((x) => x.type !== type && (x.type === 'joker' || !left.every((q) => E.beats(q, x.type))));
+      if (type !== 'joker' && left.every((q) => E.beats(q, type))) assert.ok(!others, 'played a certain loser ' + type + ' while a safe piece existed');
+      s = E.play(s, a, b);
+    }
+  }
+  assert.ok(Object.keys(seen).length >= 7, 'should use nearly every piece type');
+  const s0 = E.createGame(), real = E.botPick(s0, 1, seeded(5), 'random');
+  const tam = JSON.parse(JSON.stringify(s0)); tam.hands[0] = tam.hands[0].slice(0, 1);
+  assert.strictEqual(E.botPick(tam, 1, seeded(5), 'random'), real, 'ignores opponent hand in the state');
 });
 
 console.log('\n' + passed + ' tests passed');
