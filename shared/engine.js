@@ -407,5 +407,5 @@
     return mine.filter((x) => x.type === type)[0].id;
   }
 
-  return { PIECES, ORDER, BEATS, beats, createGame, play, describeRound, endText, viewFor, botPick, predictOpponent, estimateOpponent, trackHand, BOT_LEVELS };
+  return { PIECES, ORDER, BEATS, beats, newHand, createGame, play, describeRound, endText, viewFor, botPick, predictOpponent, estimateOpponent, trackHand, BOT_LEVELS };
 });

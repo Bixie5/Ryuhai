@@ -173,6 +173,7 @@
       net.open = true;
       var r = store.sget('hc_resume');
       if (r && session && session.kind === 'online') { try { ws.send(JSON.stringify(Object.assign({ type: 'resume' }, JSON.parse(r)))); } catch (e) {} }
+      else if (window.HCMulti && window.HCMulti.active()) { var mr = store.sget('hc_mresume'); if (mr) { try { ws.send(JSON.stringify(Object.assign({ type: 'mresume' }, JSON.parse(mr)))); } catch (e) {} } }
       else if (!session) ws.send(JSON.stringify({ type: 'list' }));
       if (net.onopen) net.onopen();
     };
@@ -181,7 +182,7 @@
       net.open = false;
       if (net.ws === ws) net.ws = null;
       if (net.wantOpen) {
-        if (session && session.kind === 'online') toast('Connection lost. Reconnecting...');
+        if ((session && session.kind === 'online') || (window.HCMulti && window.HCMulti.active())) toast('Connection lost. Reconnecting...');
         clearTimeout(net.retry); net.retry = setTimeout(connect, 2000);
       }
     };
@@ -203,6 +204,7 @@
   function homeMsg(t) { $('homeMsg').textContent = t || ''; }
 
   function onNet(m) {
+    if (window.HCMulti && (m.type.charAt(0) === 'm' || m.multi)) { if (window.HCMulti.onNet(m)) return; }
     switch (m.type) {
       case 'rooms': return renderRooms(m.rooms);
       case 'joined':
@@ -785,12 +787,19 @@
 
   // Android back button / browser back: close overlays first, then offer to leave the game.
   window.__hcBack = function () {
-    var ids = ['previewOverlay', 'rulesOverlay', 'historyOverlay', 'serverOverlay', 'accountOverlay', 'botOverlay'];
+    var ids = ['mJoinOverlay', 'previewOverlay', 'rulesOverlay', 'historyOverlay', 'serverOverlay', 'accountOverlay', 'botOverlay'];
     for (var i = 0; i < ids.length; i++) { if (!$(ids[i]).hidden) { show(ids[i], false); return true; } }
+    if (window.HCMulti && window.HCMulti.back()) return true;
     if (!$('shop').hidden) { closeShop(); return true; }
     if (!$('endOverlay').hidden) { goHome(); return true; }
     if (session) { if (confirm('Leave this game?')) goHome(); return true; }
     return false;
+  };
+  window.__hcApp = {
+    store: store, el: el, show: show, toast: toast, netSend: netSend, whenOpen: whenOpen, playerName: playerName, equippedMap: equippedMap,
+    bananaBalance: bananaBalance, tweenBananas: tweenBananas, paintPoints: paintPoints, pointsRecord: pointsRecord, pointsTotal: pointsTotal,
+    fmtBananas: fmtBananas, fmtPts: fmtPts, BANANA_SVG: BANANA_SVG, homeMsg: homeMsg,
+    home: function () { show('home', true); homeMsg(''); if (wsUrl()) { connect(); if (net.open) netSend({ type: 'list' }); } }
   };
   window.__hc = { wsUrl: wsUrl, get session() { return session; }, get last() { return lastMsg; } };
 })();

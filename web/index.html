@@ -34,6 +34,7 @@
         <button id="btnJoin" class="btn">Join</button>
       </div>
       <div id="openRooms" class="rooms" hidden></div>
+      <button id="btnMulti" class="btn">Multiplayer &middot; 2 to 6</button>
       <div class="row split">
         <button id="btnBot" class="btn ghost">Play vs Bot</button>
         <button id="btnHotseat" class="btn ghost">Pass &amp; play</button>
@@ -107,7 +108,82 @@
     </div>
   </section>
 
+  <!-- MULTIPLAYER: lobby -->
+  <section id="mlobby" class="screen" hidden>
+    <div class="topbar">
+      <button id="mLobbyLeave" class="link" aria-label="Leave room">&larr; Leave</button>
+      <div class="roomtag">Room <b id="mLobbyCode">----</b></div>
+      <span></span>
+    </div>
+    <p id="mLobbyHint" class="shop-intro"></p>
+    <div id="mSeats" class="mseats"></div>
+    <div id="mHostBtns" class="row split" hidden>
+      <button id="mAddSmart" class="btn ghost">+ Smart bot</button>
+      <button id="mAddRandom" class="btn ghost">+ Random bot</button>
+    </div>
+    <button id="mStart" class="btn primary" hidden>Start game</button>
+    <p id="mLobbyNote" class="msg"></p>
+  </section>
+
+  <!-- MULTIPLAYER: game -->
+  <section id="mgame" class="screen" hidden>
+    <div class="topbar">
+      <button id="mLeave" class="link" aria-label="Leave game">&larr; Leave</button>
+      <div class="roomtag">Room <b id="mCode">----</b> &middot; Round <b id="mRound">1</b></div>
+      <button id="mLog" class="link">Log</button>
+    </div>
+    <div class="col-arena">
+      <div id="mPlayers" class="mplayers"></div>
+      <div id="mArena" class="arena marena" aria-live="polite">
+        <div id="mIdle" class="arena-idle"></div>
+        <div id="mReveal" class="mreveal" hidden></div>
+      </div>
+    </div>
+    <div class="col-cards">
+      <div id="mYouLine" class="scoreline you"></div>
+      <div id="mHand" class="hand" role="listbox" aria-label="Your pieces"></div>
+      <div id="mTarget" class="mtarget" hidden><span>The Joker copies which player's piece?</span><div id="mTargetBtns" class="mtargets"></div></div>
+      <div class="actions">
+        <div id="mInfo" class="pickinfo">Select a piece</div>
+        <button id="mLock" class="btn primary" disabled>Lock in</button>
+        <button id="mNext" class="btn primary" hidden>Next turn</button>
+      </div>
+    </div>
+  </section>
+
   <!-- overlays -->
+  <div id="mJoinOverlay" class="overlay" hidden>
+    <div class="sheet">
+      <h2>Multiplayer</h2>
+      <p class="small">2 to 6 players. Everyone's piece fights everyone else's at the same time. Last one with a Monarch wins.</p>
+      <div class="stack">
+        <button id="mCreate" class="btn primary">Create a room</button>
+        <div class="row">
+          <input id="mJoinCode" class="code-input" maxlength="4" placeholder="CODE" autocapitalize="characters" autocomplete="off" aria-label="Room code">
+          <button id="mJoin" class="btn">Join</button>
+        </div>
+        <div id="mRooms" class="rooms" hidden></div>
+      </div>
+      <p id="mJoinMsg" class="msg" role="status"></p>
+      <button id="mJoinCancel" class="btn ghost">Cancel</button>
+    </div>
+  </div>
+
+  <div id="mEnd" class="overlay" hidden>
+    <div class="sheet center">
+      <h2 id="mEndTitle"></h2>
+      <p id="mEndText"></p>
+      <ol id="mStandings" class="mstandings"></ol>
+      <p id="mBanana" class="banana-gain" hidden></p>
+      <p id="mPoints" class="points-gain" hidden></p>
+      <div class="stack">
+        <button id="mAgain" class="btn primary">Play again</button>
+        <button id="mEndLeave" class="btn ghost">Back to menu</button>
+      </div>
+      <p id="mAgainNote" class="msg"></p>
+    </div>
+  </div>
+
   <div id="cover" class="overlay" hidden>
     <div class="sheet center">
       <h2 id="coverTitle">Pass the device</h2>
@@ -157,6 +233,8 @@
         <li>Your opponent's last Monarch is taken.</li>
       </ul>
       <p class="small">If both Monarchs fall in the same round it is a draw. Having no piece that can beat the opponent's does not end the game.</p>
+      <h3>Multiplayer (2 to 6)</h3>
+      <p class="small">Everyone secretly picks one piece. Then your piece fights every other player's piece at once, as separate clashes judged only from what was revealed. A piece that loses (or ties) any clash is destroyed, even if it won another. A piece that wins or draws every clash returns to hand. You are out when your last Monarch falls; the last player left wins. If the last players fall together it is a draw. When you pick the Joker you also choose, in secret, which player's piece it copies. It becomes that piece for good, draws with that player and fights everyone else as the copied piece.</p>
       <p class="small">Equal pieces destroy each other. The winning piece returns to hand and can be used again; only the Dragon is spent. A Joker becomes the piece it meets; both then return to hand. The Joker can never be destroyed before it transforms.</p>
       <button id="btnCloseRules" class="btn">Close</button>
     </div>
@@ -237,10 +315,12 @@
 </main>
 
 <script src="shared/engine.js"></script>
+<script src="shared/multi.js"></script>
 <script src="pieces.js"></script>
 <script src="shop/catalog.js"></script>
 <script src="config.js"></script>
 <script src="sync.js"></script>
 <script src="app.js"></script>
+<script src="multi.js"></script>
 </body>
 </html>

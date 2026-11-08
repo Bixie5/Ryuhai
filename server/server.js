@@ -9,6 +9,7 @@ const E = require('../shared/engine');
 const { createAccounts } = require('./accounts');
 const { createShop } = require('./shop');
 const { createRemote, fromEnv } = require('./remote');
+const { createMulti } = require('./multi');
 
 const ROOT = path.join(__dirname, '..');
 const MIME = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8',
@@ -133,12 +134,13 @@ function createServer(opts) {
   const wss = new WebSocketServer({ server, path: '/ws', maxPayload: 4096 });
 
   const send = (ws, msg) => { if (ws && ws.readyState === 1) ws.send(JSON.stringify(msg)); };
+  const multiRooms = new Map();   // multiplayer rooms (2 to 6 players), see server/multi.js
   const newCode = () => {
     const letters = 'ABCDEFGHJKLMNPQRSTUVWXYZ';
     for (;;) {
       let c = '';
       for (let i = 0; i < 4; i++) c += letters[crypto.randomInt(letters.length)];
-      if (!rooms.has(c)) return c;
+      if (!rooms.has(c) && !multiRooms.has(c)) return c;
     }
   };
   // Equipped skins are cosmetic: { piece: skinId }. Only well-formed ids for known pieces are relayed.
@@ -148,6 +150,7 @@ function createServer(opts) {
     return out;
   };
   const cleanName = (n, fallback) => String(n || '').replace(/[^\w \-.']/g, '').trim().slice(0, 16) || fallback;
+  const multi = createMulti({ send: send, cleanName: cleanName, cleanSkins: cleanSkins, newCode: newCode, rooms: multiRooms, autoMs: opts.multiAutoMs });
 
   function pushState(room) {
     [0, 1].forEach((seat) => {
@@ -189,6 +192,7 @@ function createServer(opts) {
   function seatOf(room, ws) { return room.players.findIndex((p) => p && p.ws === ws); }
 
   function handle(ws, msg) {
+    if (msg.type[0] === 'm' && multi.handle(ws, msg)) return;
     switch (msg.type) {
       case 'list': return send(ws, { type: 'rooms', rooms: openRooms() });
       case 'create': {
@@ -288,12 +292,13 @@ function createServer(opts) {
       let msg; try { msg = JSON.parse(raw); } catch (e) { return; }
       if (msg && typeof msg.type === 'string') { try { handle(ws, msg); } catch (e) { send(ws, { type: 'error', message: 'Something went wrong.' }); } }
     });
-    ws.on('close', () => leave(ws, false));
+    ws.on('close', () => { leave(ws, false); multi.onClose(ws); });
   });
 
   const timer = setInterval(() => {
     wss.clients.forEach((ws) => { if (!ws.isAlive) return ws.terminate(); ws.isAlive = false; ws.ping(); });
     const now = Date.now();
+    multi.sweep(now, ROOM_TTL);
     rooms.forEach((r, code) => {
       const anyone = r.players.some((p) => p && p.ws && p.ws.readyState === 1);
       if (!anyone && now - r.touched > 1000 * 60 * 10) rooms.delete(code);
@@ -301,7 +306,7 @@ function createServer(opts) {
     });
   }, 15000);
   server.on('close', () => clearInterval(timer));
-  return { server, wss, rooms, shop, adminKey };
+  return { server, wss, rooms, multi, shop, adminKey };
 }
 
 function lanAddresses() {

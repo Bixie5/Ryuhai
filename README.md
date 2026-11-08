@@ -62,8 +62,24 @@ The game ends only when a Monarch is eliminated: capture the opponent's last Mon
 - A winning piece returns to hand and can be used again; the loser is destroyed. Only the Dragon is spent after winning. Equal pieces destroy each other (except Jokers).
 - A player loses only when their last Monarch (any Monarch piece, including a Joker that became one) is captured. Losing one of multiple Monarchs does not end the game. If both players lose their last Monarch in the same round, the game is a draw.
 
+## Multiplayer (2 to 6 players)
+On the home screen choose **Multiplayer**. One player creates a room and shares the 4-letter code (or others pick it from the open-rooms list). The host can add **Random** or **Smart** bots to fill empty seats, remove them again, and start once 2 or more seats are filled.
+
+How a round works:
+- Every player still in the game secretly picks **one** piece. Nobody sees anyone's pick or hand.
+- Everything is revealed and your piece **fights every other player's piece** (a separate 1v1 clash for each pair). All clashes are decided at the same moment from the revealed pieces, so a player who is eliminated this round still has their clashes counted.
+- A piece that **loses any clash is destroyed**. A piece that wins or draws all its clashes returns to hand. The Dragon is spent after winning. Equal pieces destroy each other.
+- Example: A plays Empress, B plays Monarch, C plays Knight. Empress beats Monarch, Monarch beats Knight, Knight beats Empress, so all three pieces are destroyed.
+- **Joker:** when you pick the Joker you also choose, before it is played, **which player's piece it copies**. The choice is locked in together with the pick and stays hidden until the reveal. The Joker becomes that player's piece for good and clashes with everyone else as that piece. It and the copied piece draw (both return). If the player you chose also played a Joker, nothing changes between the two Jokers.
+- You are out when your **last Monarch** is destroyed (a Joker that became a Monarch counts). Players who fall in the same round share a place. The last player standing wins; if the last players fall together it is a draw between them.
+
+Payouts (online, only when **every** seat is a human; games with bots pay nothing): bananas go from +100 for 1st down to -50 for last, spread evenly by finishing place; PvP points go from +10 down to -10. Shared places average their values; a shared first place (draw) gets +50 bananas and +5 points. Each game pays once.
+
+Bots in multiplayer: **Random** picks any piece except one that is certain to be destroyed (it tracks what each opponent can still hold); **Smart** weighs survival and Monarch hunting for every opponent, guards its last Monarch and keeps the Dragon back while the table is crowded. If a human leaves mid-game, a bot takes their seat so the others can finish.
+
 ## Layout
 - `shared/engine.js` rules engine (used by server, browser and app), `shared/engine.test.js`
+- `shared/multi.js` multiplayer rules and bots, `shared/multi.test.js`; `server/multi.js` multiplayer rooms, `server/multi.test.js`; `web/multi.js` multiplayer screens
 - `server/server.js` rooms + static hosting, `server/server.test.js`
 - `web/` the client
 - `android/` Gradle project
